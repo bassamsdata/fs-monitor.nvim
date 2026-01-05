@@ -102,10 +102,8 @@ function FSMonitor:_get_relative_path(path, root_path)
   local normalized_file = vim.fs.normalize(path)
   local normalized_root = vim.fs.normalize(root_path)
 
-  -- Try to strip the root prefix
   if normalized_file:sub(1, #normalized_root) == normalized_root then
     local relative = normalized_file:sub(#normalized_root + 1)
-    -- Remove leading separator
     if relative:sub(1, 1) == "/" or relative:sub(1, 1) == "\\" then relative = relative:sub(2) end
     return relative
   end
@@ -140,9 +138,8 @@ end
 
 ---Check if file should be ignored based on patterns
 ---@param filepath string
----@param is_dir? boolean Whether the path is a directory
 ---@return boolean should_ignore
-function FSMonitor:_should_ignore_file(filepath, is_dir)
+function FSMonitor:_should_ignore_file(filepath)
   return gitignore.should_ignore(filepath, self.ignore_patterns, self.custom_ignore_patterns)
 end
 
@@ -177,13 +174,11 @@ function FSMonitor:_read_file_async(filepath, callback)
         return callback(nil, "Failed to get file stats")
       end
 
-      -- Skip files that are too large
       if stat.size > self.max_file_size then
         uv.fs_close(fd)
         return callback(nil, fmt("File too large: %d bytes", stat.size))
       end
 
-      -- Handle empty files
       if stat.size == 0 then
         uv.fs_close(fd)
         return callback("", nil)
@@ -194,7 +189,6 @@ function FSMonitor:_read_file_async(filepath, callback)
 
         if err_read then return callback(nil, err_read) end
 
-        -- Skip binary files
         if data and is_binary_content(data) then return callback(nil, "Binary file") end
 
         callback(data or "", nil)
@@ -231,17 +225,12 @@ local function detect_rename(self, new_change)
   for i = #self.changes, 1, -1 do
     local existing = self.changes[i]
 
-    -- Only check within time window
     local time_diff = current_time - existing.timestamp
     if time_diff > RENAME_DETECTION_WINDOW then break end
 
-    -- Check if this is a deleted file with matching content
     if existing.kind == "deleted" and existing.old_content then
       local old_hash = content_hash(existing.old_content)
-      if old_hash == new_hash then
-        -- Found a match - this is likely a rename
-        return existing
-      end
+      if old_hash == new_hash then return existing end
     end
   end
 
@@ -259,12 +248,10 @@ function FSMonitor:_register_change(change)
     local existing = self.changes[i]
     if existing.path == change.path and existing.kind == change.kind then
       local time_diff = current_time - existing.timestamp
-      -- Within 1 second
       if time_diff < 1000000000 then
         duplicate = true
         break
       end
-      -- Only check recent changes
       if time_diff > 5000000000 then -- 5 seconds
         break
       end
@@ -273,7 +260,6 @@ function FSMonitor:_register_change(change)
 
   if duplicate then return end
 
-  -- Check for rename detection (created file matching recently deleted file)
   local deleted_match = detect_rename(self, change)
   if deleted_match then
     -- Convert delete + create into a rename
@@ -285,7 +271,6 @@ function FSMonitor:_register_change(change)
       end
     end
 
-    -- Create a rename change instead
     change = {
       path = change.path,
       kind = "renamed",
@@ -299,7 +284,6 @@ function FSMonitor:_register_change(change)
       },
     }
 
-    -- Fire rename event
     vim.api.nvim_exec_autocmds("User", {
       pattern = "FSMonitorFileChanged",
       data = {
@@ -313,14 +297,11 @@ function FSMonitor:_register_change(change)
     })
 
     table.insert(self.changes, change)
-    log:debug("Registered %s: %s", kind, relative_path)
     return
   end
 
-  -- Regular change registration
   table.insert(self.changes, change)
 
-  -- Fire event for real-time tracking
   vim.api.nvim_exec_autocmds("User", {
     pattern = "FSMonitorFileChanged",
     data = {
@@ -352,13 +333,10 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
   local relative_path = self:_get_relative_path(path, watch.root_path)
   local cached_content = lru.get(watch.cache, relative_path)
 
-  -- Read current file content
   self:_read_file_async(path, function(new_content, err)
     vim.schedule(function()
-      -- Check if watch is still active
       if not self.watches[watch_id] or not self.watches[watch_id].enabled then return end
 
-      -- File deleted or doesn't exist
       if err and (err:match("ENOENT") or err:match("no such file")) then
         if cached_content then
           lru.remove(watch.cache, relative_path)
@@ -383,7 +361,6 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
 
       local should_cache = false
       if cached_content then
-        -- File was modified - compare contents
         if cached_content ~= new_content then
           should_cache = true
           self:_register_change({
@@ -400,7 +377,6 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
           })
         end
       else
-        -- File was created (not in cache)
         should_cache = true
         self:_register_change({
           path = relative_path,
@@ -425,8 +401,7 @@ end
 ---Handle a file system event
 ---@param watch_id string
 ---@param filename string Relative filename that changed
----@param events table Event info from uv
-function FSMonitor:_handle_fs_event(watch_id, filename, events)
+function FSMonitor:_handle_fs_event(watch_id, filename)
   local watch = self.watches[watch_id]
   if not watch or not watch.enabled then return end
 
@@ -440,12 +415,10 @@ function FSMonitor:_handle_fs_event(watch_id, filename, events)
     watch.debounce_timer = uv.new_timer()
   end
 
-  -- Process all pending events after debounce delay
   watch.debounce_timer:start(self.debounce_ms, 0, function()
     vim.schedule(function()
       if not self.watches[watch_id] or not self.watches[watch_id].enabled then return end
 
-      -- Process all pending events (async)
       local pending = vim.tbl_keys(watch.pending_events)
       watch.pending_events = {}
 
@@ -486,7 +459,6 @@ function FSMonitor:_prepopulate_cache(watch, target_path, is_dir, on_complete)
   end
 
   if not is_dir then
-    -- Single file
     local relative_path = self:_get_relative_path(target_path, watch.root_path)
     self:_read_file_async(target_path, function(content, err)
       vim.schedule(function()
@@ -503,8 +475,7 @@ function FSMonitor:_prepopulate_cache(watch, target_path, is_dir, on_complete)
     return
   end
 
-  -- Directory: scan recursively using fs_opendir/readdir
-  local count = { value = 0 } -- Wrap in table for reference sharing
+  local count = { value = 0 }
 
   local function scan_dir(dir, depth)
     if count.value >= self.max_prepopulate_files or depth > self.max_depth then
@@ -531,13 +502,11 @@ function FSMonitor:_prepopulate_cache(watch, target_path, is_dir, on_complete)
           end
 
           if not entries then
-            -- No more entries, close directory
             dir_handle:closedir()
             done()
             return
           end
 
-          -- Process batch of entries
           for _, entry in ipairs(entries) do
             if count.value >= self.max_prepopulate_files then
               dir_handle:closedir()
@@ -546,9 +515,9 @@ function FSMonitor:_prepopulate_cache(watch, target_path, is_dir, on_complete)
             end
 
             local full_path = vim.fs.joinpath(dir, entry.name)
-            local is_dir = entry.type == "directory"
+            is_dir = entry.type == "directory"
 
-            if not self:_should_ignore_file(full_path, is_dir) then
+            if not self:_should_ignore_file(full_path) then
               if entry.type == "file" then
                 stats.files_scanned = stats.files_scanned + 1
                 local relative_path = self:_get_relative_path(full_path, watch.root_path)
@@ -576,7 +545,6 @@ function FSMonitor:_prepopulate_cache(watch, target_path, is_dir, on_complete)
             end
           end
 
-          -- Read next batch
           read_batch()
         end)
       end
@@ -607,10 +575,8 @@ function FSMonitor:start_monitoring(tool_name, target_path, opts)
   local is_dir = stat.type == "directory"
   local root_path = is_dir and normalized_path or vim.fs.dirname(normalized_path)
 
-  -- Load gitignore patterns for this watch root
   self:_ensure_gitignore_loaded(root_path)
 
-  -- Check if we're already watching this path
   for existing_watch_id, watch in pairs(self.watches) do
     if watch.root_path == root_path and watch.enabled then return existing_watch_id end
   end
@@ -618,7 +584,6 @@ function FSMonitor:start_monitoring(tool_name, target_path, opts)
   local watch_id = self:_generate_watch_id(tool_name, root_path)
   log:debug("Starting monitoring: %s at %s", watch_id, root_path)
 
-  -- Create watch structure with LRU cache
   self.watches[watch_id] = {
     handle = nil,
     root_path = root_path,
@@ -632,20 +597,18 @@ function FSMonitor:start_monitoring(tool_name, target_path, opts)
 
   local watch = self.watches[watch_id]
 
-  -- Start prepopulation if requested
   if prepopulate then self:_prepopulate_cache(watch, normalized_path, is_dir, on_ready) end
 
-  -- Start file system watch
   watch.handle = uv.new_fs_event()
   if not watch.handle then
     self.watches[watch_id] = nil
     return ""
   end
 
-  local ok, err = watch.handle:start(root_path, { recursive = recursive }, function(err_event, filename, events)
+  local ok = watch.handle:start(root_path, { recursive = recursive }, function(err_event, filename)
     if err_event then return end
 
-    if filename then self:_handle_fs_event(watch_id, filename, events) end
+    if filename then self:_handle_fs_event(watch_id, filename) end
   end)
 
   if not ok then
@@ -690,7 +653,6 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
   watch.enabled = false
   log:debug("Stopping monitoring: %s", watch_id)
 
-  -- Gather pending events before cleanup
   local pending_paths = vim.tbl_keys(watch.pending_events or {})
   local watch_cache = watch.cache
   local watch_root = watch.root_path
@@ -706,7 +668,6 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
     return session_changes
   end
 
-  -- No pending? Clean up and return immediately
   if #pending_paths == 0 then
     local session_changes = get_session_changes()
     cleanup_watch(watch)
@@ -727,7 +688,6 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
     watch.handle = nil
   end
 
-  -- Track async completion
   local remaining = #pending_paths
   local completed = false
 
@@ -745,15 +705,12 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
     end
   end
 
-  -- Process all pending files asynchronously
-  -- Use local copies since watch will be cleaned up
   for _, path in ipairs(pending_paths) do
     local relative_path = self:_get_relative_path(path, watch_root)
     local cached_content = watch_cache and lru.get(watch_cache, relative_path)
 
     self:_read_file_async(path, function(content, err)
       vim.schedule(function()
-        -- File deleted or doesn't exist
         if err and (err:match("ENOENT") or err:match("no such file")) then
           if cached_content then
             self:_register_change({
@@ -767,7 +724,6 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
             })
           end
         elseif not err and content then
-          -- File modified
           if cached_content and cached_content ~= content then
             self:_register_change({
               path = relative_path,
@@ -782,7 +738,6 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
               },
             })
           elseif not cached_content then
-            -- File created
             self:_register_change({
               path = relative_path,
               kind = "created",
@@ -808,7 +763,6 @@ end
 function FSMonitor:stop_all_async(callback)
   local watch_ids = vim.tbl_keys(self.watches)
   if #watch_ids == 0 then
-    -- Clear any stale content cache
     self.content_cache = {}
     return callback()
   end
@@ -818,7 +772,6 @@ function FSMonitor:stop_all_async(callback)
     self:stop_monitoring_async(watch_id, function()
       remaining = remaining - 1
       if remaining == 0 then
-        -- Clear global content cache after all watches stopped
         self.content_cache = {}
         callback()
       end
@@ -870,7 +823,6 @@ function FSMonitor:set_changes(new_changes)
     files_with_changes[change.path] = true
   end
 
-  -- Remove cache entries for files no longer in changes
   for path, _ in pairs(self.content_cache) do
     if not files_with_changes[path] then self.content_cache[path] = nil end
   end
@@ -961,7 +913,6 @@ function FSMonitor:tag_changes_in_range(start_time, end_time, tool_name, tool_ar
 
   for _, change in ipairs(self.changes) do
     if change.timestamp >= start_time and change.timestamp <= end_time then
-      -- Initialize tools array if not exists
       if not change.tools then
         change.tools = {}
         change.metadata = change.metadata or {}
@@ -982,7 +933,6 @@ function FSMonitor:tag_changes_in_range(start_time, end_time, tool_name, tool_ar
         matches_declared_path = true
       end
 
-      -- Tag the change with actual tool name
       if not vim.tbl_contains(change.tools, tool_name) then table.insert(change.tools, tool_name) end
 
       if matches_declared_path then
@@ -1042,7 +992,6 @@ function FSMonitor:revert_to_checkpoint(checkpoint_idx, checkpoints)
 
   if checkpoint_idx < 1 or checkpoint_idx > #checkpoints then return nil end
 
-  -- R on final checkpoint = do nothing (already at final state)
   if checkpoint_idx == #checkpoints then return nil end
 
   local cwd = vim.fn.getcwd()
@@ -1075,14 +1024,11 @@ function FSMonitor:revert_to_checkpoint(checkpoint_idx, checkpoints)
 
   local reverted, errors, modified_files = self:_apply_file_reverts(file_actions, cwd)
 
-  -- Trigger checktime for modified buffers
   self:_refresh_modified_buffers(modified_files, cwd)
 
-  -- Update internal state
   self.changes = changes_to_keep
   self:_cleanup_content_cache(changes_to_keep)
 
-  -- Build new checkpoints list - keep only up to and including target
   local new_checkpoints = {}
   for i = 1, checkpoint_idx do
     table.insert(new_checkpoints, checkpoints[i])
@@ -1098,9 +1044,9 @@ function FSMonitor:revert_to_checkpoint(checkpoint_idx, checkpoints)
 end
 
 ---Revert ALL changes to original state (before any monitoring)
----@param checkpoints table List of all checkpoints (will be cleared)
+---@param _checkpoints table List of all checkpoints (will be cleared)
 ---@return table|nil result { new_changes, new_checkpoints, reverted_count, error_count } or nil if no changes
-function FSMonitor:revert_to_original(checkpoints)
+function FSMonitor:revert_to_original(_checkpoints)
   if #self.changes == 0 then return nil end
 
   local cwd = vim.fn.getcwd()
@@ -1116,10 +1062,8 @@ function FSMonitor:revert_to_original(checkpoints)
 
   local reverted, errors, modified_files = self:_apply_file_reverts(file_actions, cwd)
 
-  -- Trigger checktime for modified buffers
   self:_refresh_modified_buffers(modified_files, cwd)
 
-  -- Clear all state
   self.changes = {}
   self.content_cache = {}
 
