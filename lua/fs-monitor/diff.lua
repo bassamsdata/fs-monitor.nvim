@@ -1,3 +1,5 @@
+---@module "fs-monitor.types"
+
 ---@class FSMonitor.Diff
 local M = {}
 
@@ -97,7 +99,7 @@ end
 
 ---Determine the net operation for a file across all changes in a session
 ---@param file_changes FSMonitor.Change[]
----@return "created"|"modified"|"deleted"|"renamed"
+---@return FSMonitor.Change.Kind
 local function determine_net_operation(file_changes)
   if #file_changes == 0 then return "modified" end
 
@@ -234,12 +236,25 @@ function M.show(changes, checkpoints, opts)
     hunk_ranges = {},
     line_mappings = {},
     current_filepath = nil,
+    word_diff = get_config().word_diff,
     generate_summary = generate_summary,
     get_geometry = get_geometry,
   }
 
-  render.render_file_list(state.files_buf, state.ns, summary.files, summary.by_file, state.selected_file_idx)
-  render.render_checkpoints(state.checkpoints_buf, state.ns, checkpoints, changes, state.selected_checkpoint_idx)
+  render.render_file_list({
+    buf = state.files_buf,
+    ns = state.ns,
+    files = summary.files,
+    by_file = summary.by_file,
+    selected_idx = state.selected_file_idx,
+  })
+  render.render_checkpoints({
+    buf = state.checkpoints_buf,
+    ns = state.ns,
+    checkpoints = checkpoints,
+    all_changes = changes,
+    selected_idx = state.selected_checkpoint_idx,
+  })
 
   actions.setup_keymaps(state)
   actions.setup_autocmds(state)

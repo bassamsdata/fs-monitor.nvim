@@ -64,12 +64,15 @@ M.diff_defaults = {
     toggle_help = { key = "?", desc = "Toggle help" },
     toggle_preview = { key = "m", desc = "Preview only" },
     toggle_fullscreen = { key = "M", desc = "Fullscreen" },
+    toggle_word_diff = { key = "gw", desc = "Toggle word diff" },
     reset_filter = { key = "r", desc = "Reset filter" },
     view_checkpoint = { key = "<CR>", desc = "View changes" },
     view_cumulative = { key = "a", desc = "Cumulative" },
     revert_checkpoint = { key = "R", desc = "Revert" },
     revert_all = { key = "X", desc = "Revert all" },
   },
+
+  word_diff = true,
 }
 
 ---@type FSMonitor.Config

@@ -4,6 +4,69 @@ local M = {}
 local api = vim.api
 local set_option = vim.api.nvim_set_option_value
 
+-- ============================================================================
+-- HELPER FUNCTIONS
+-- ============================================================================
+
+---Refresh all UI panels after state changes
+---@param state table
+---@param opts? { selected_checkpoint_idx?: number|nil, show_empty_message?: boolean }
+local function refresh_ui(state, opts)
+  opts = opts or {}
+  local render = require("fs-monitor.diff.render")
+
+  set_option("modifiable", true, { buf = state.files_buf })
+  render.render_file_list({
+    buf = state.files_buf,
+    ns = state.ns,
+    files = state.summary.files,
+    by_file = state.summary.by_file,
+    selected_idx = state.selected_file_idx,
+  })
+  set_option("modifiable", false, { buf = state.files_buf })
+
+  set_option("modifiable", true, { buf = state.checkpoints_buf })
+  render.render_checkpoints({
+    buf = state.checkpoints_buf,
+    ns = state.ns,
+    checkpoints = state.checkpoints,
+    all_changes = state.all_changes,
+    selected_idx = opts.selected_checkpoint_idx,
+  })
+  set_option("modifiable", false, { buf = state.checkpoints_buf })
+
+  if #state.summary.files > 0 then
+    if state.selected_file_idx > #state.summary.files then state.selected_file_idx = #state.summary.files end
+    if state.selected_file_idx < 1 then state.selected_file_idx = 1 end
+    pcall(api.nvim_win_set_cursor, state.files_win, { state.selected_file_idx, 0 })
+    M.update_preview(state, state.selected_file_idx)
+  elseif opts.show_empty_message then
+    set_option("modifiable", true, { buf = state.right_buf })
+    api.nvim_buf_set_lines(state.right_buf, 0, -1, false, { "", "No changes remaining", "" })
+    set_option("modifiable", false, { buf = state.right_buf })
+  end
+end
+
+---Open file in editor with optional line number
+---@param filepath string Absolute path to file
+---@param line? number Optional line number to jump to
+local function open_file_at_line(filepath, line)
+  local bufnr = vim.fn.bufnr(filepath)
+  if bufnr == -1 then
+    vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+    bufnr = api.nvim_get_current_buf()
+  else
+    vim.cmd("buffer " .. bufnr)
+  end
+
+  if line then
+    local buf_lines = api.nvim_buf_line_count(bufnr)
+    if line > buf_lines then line = buf_lines end
+    pcall(api.nvim_win_set_cursor, 0, { line, 0 })
+    vim.cmd("normal! zz")
+  end
+end
+
 ---Get diff configuration
 ---@return FSMonitor.DiffConfig
 local function get_config()
@@ -116,7 +179,12 @@ function M.update_preview(state, idx)
 
   set_option("modifiable", true, { buf = state.right_buf })
   api.nvim_buf_clear_namespace(state.right_buf, state.ns, 0, -1)
-  local _, line_mappings, hunk_ranges = render.render_diff(state.right_buf, state.ns, hunks)
+  local _, line_mappings, hunk_ranges = render.render_diff({
+    buf = state.right_buf,
+    ns = state.ns,
+    hunks = hunks,
+    word_diff = state.word_diff,
+  })
   set_option("modifiable", false, { buf = state.right_buf })
 
   state.line_mappings = line_mappings
@@ -174,13 +242,15 @@ function M.navigate_files(state, direction)
   end
 
   M.update_preview(state, new_file_idx)
-  render.render_file_list(
-    state.files_buf,
-    state.ns,
-    state.summary.files,
-    state.summary.by_file,
-    state.selected_file_idx
-  )
+  set_option("modifiable", true, { buf = state.files_buf })
+  render.render_file_list({
+    buf = state.files_buf,
+    ns = state.ns,
+    files = state.summary.files,
+    by_file = state.summary.by_file,
+    selected_idx = new_file_idx,
+  })
+  set_option("modifiable", false, { buf = state.files_buf })
 end
 
 ---Find which hunk the current line belongs to
@@ -194,6 +264,13 @@ local function find_current_hunk(hunk_ranges, current_line)
   return nil
 end
 
+---Get first content line of a hunk (skip the @@ header line)
+---@param range table
+---@return number
+local function get_hunk_content_line(range)
+  return range.start_line + 4
+end
+
 ---Jump to next hunk in diff preview
 ---@param state table
 function M.jump_next_hunk(state)
@@ -205,13 +282,13 @@ function M.jump_next_hunk(state)
 
   for _, range in ipairs(state.hunk_ranges) do
     if range.start_line > current_line then
-      api.nvim_win_set_cursor(state.right_win, { range.start_line, 0 })
+      api.nvim_win_set_cursor(state.right_win, { get_hunk_content_line(range), 0 })
       vim.cmd("normal! zz")
       return
     end
   end
 
-  api.nvim_win_set_cursor(state.right_win, { state.hunk_ranges[1].start_line, 0 })
+  api.nvim_win_set_cursor(state.right_win, { get_hunk_content_line(state.hunk_ranges[1]), 0 })
   vim.cmd("normal! zz")
 end
 
@@ -227,30 +304,36 @@ function M.jump_prev_hunk(state)
   local current_hunk_idx = find_current_hunk(state.hunk_ranges, current_line)
 
   if current_hunk_idx then
-    local current_hunk = state.hunk_ranges[current_hunk_idx]
-    if current_line > current_hunk.start_line then
-      api.nvim_win_set_cursor(state.right_win, { current_hunk.start_line, 0 })
-      vim.cmd("normal! zz")
-      return
-    end
-
     if current_hunk_idx > 1 then
-      api.nvim_win_set_cursor(state.right_win, { state.hunk_ranges[current_hunk_idx - 1].start_line, 0 })
+      api.nvim_win_set_cursor(state.right_win, { get_hunk_content_line(state.hunk_ranges[current_hunk_idx - 1]), 0 })
       vim.cmd("normal! zz")
       return
     end
   else
     for i = #state.hunk_ranges, 1, -1 do
       if state.hunk_ranges[i].start_line < current_line then
-        api.nvim_win_set_cursor(state.right_win, { state.hunk_ranges[i].start_line, 0 })
+        api.nvim_win_set_cursor(state.right_win, { get_hunk_content_line(state.hunk_ranges[i]), 0 })
         vim.cmd("normal! zz")
         return
       end
     end
   end
 
-  api.nvim_win_set_cursor(state.right_win, { state.hunk_ranges[#state.hunk_ranges].start_line, 0 })
+  api.nvim_win_set_cursor(state.right_win, { get_hunk_content_line(state.hunk_ranges[#state.hunk_ranges]), 0 })
   vim.cmd("normal! zz")
+end
+
+---Go to the selected file in the editor (from files window)
+---@param state table
+function M.goto_file_in_editor(state)
+  local filepath = state.summary.files[state.selected_file_idx]
+  if not filepath then return end
+
+  local cwd = vim.fn.getcwd()
+  local absolute_path = vim.fs.joinpath(cwd, filepath)
+
+  M.close_windows(state, false)
+  open_file_at_line(absolute_path)
 end
 
 ---Jump from diff preview line to actual file line
@@ -283,20 +366,116 @@ function M.jump_to_file_line(state)
   end
 
   M.close_windows(state, false)
+  open_file_at_line(absolute_path, target_line)
+end
+
+-- ============================================================================
+-- HUNK REVERT
+-- ============================================================================
+
+---Revert the hunk under the cursor
+---@param state table
+function M.revert_current_hunk(state)
+  local util = require("fs-monitor.utils.util")
+  local ui = require("fs-monitor.utils.ui")
+
+  if not api.nvim_win_is_valid(state.right_win) then return end
+  if not state.hunk_ranges or #state.hunk_ranges == 0 then
+    util.notify("No hunks to revert", vim.log.levels.WARN)
+    return
+  end
+  if not state.hunks or not state.current_filepath then return end
+
+  local cursor = api.nvim_win_get_cursor(state.right_win)
+  local current_line = cursor[1]
+  local hunk_idx = find_current_hunk(state.hunk_ranges, current_line)
+
+  if not hunk_idx then
+    util.notify("Cursor is not on a hunk", vim.log.levels.WARN)
+    return
+  end
+
+  local hunk = state.hunks[hunk_idx]
+  if not hunk then return end
+
+  local confirm_result = ui.confirm(
+    string.format("Revert hunk at line %d?", hunk.original_start),
+    { "&Yes", "&No" },
+    { default = 2, highlight_group = "WarningMsg" }
+  )
+
+  if confirm_result ~= 1 then
+    util.notify("Revert cancelled")
+    return
+  end
+
+  local cwd = vim.fn.getcwd()
+  local absolute_path = vim.fs.joinpath(cwd, state.current_filepath)
+
+  local file_content = table.concat(vim.fn.readfile(absolute_path), "\n")
+  local file_lines = vim.split(file_content, "\n", { plain = true })
+
+  local start_line = hunk.updated_start
+  local end_line = start_line + hunk.updated_count - 1
+
+  local new_lines = vim.deepcopy(file_lines)
+
+  for i = end_line, start_line, -1 do
+    table.remove(new_lines, i)
+  end
+
+  for i = #hunk.removed_lines, 1, -1 do
+    table.insert(new_lines, start_line, hunk.removed_lines[i])
+  end
+
+  local ok, err = pcall(vim.fn.writefile, new_lines, absolute_path)
+  if not ok then
+    util.notify(string.format("Failed to revert hunk: %s", err), vim.log.levels.ERROR)
+    return
+  end
 
   local bufnr = vim.fn.bufnr(absolute_path)
-  if bufnr == -1 then
-    vim.cmd("edit " .. vim.fn.fnameescape(absolute_path))
-    bufnr = vim.api.nvim_get_current_buf()
-  else
-    vim.cmd("buffer " .. bufnr)
+  if bufnr ~= -1 and api.nvim_buf_is_loaded(bufnr) then vim.cmd("checktime " .. bufnr) end
+
+  util.notify("Hunk reverted successfully", vim.log.levels.INFO)
+
+  local new_content = table.concat(new_lines, "\n")
+  local monitor = state.fs_monitor
+  if monitor then
+    local dominated_idx = nil
+    local first_change_idx = nil
+    local first_old_content = nil
+
+    for i, change in ipairs(monitor.changes) do
+      if change.path == state.current_filepath then
+        if not first_change_idx then
+          first_change_idx = i
+          first_old_content = change.old_content
+        end
+        dominated_idx = i
+      end
+    end
+
+    if dominated_idx then
+      local original_content = first_old_content or ""
+
+      if new_content == original_content then
+        for i = #monitor.changes, 1, -1 do
+          if monitor.changes[i].path == state.current_filepath then table.remove(monitor.changes, i) end
+        end
+      else
+        monitor.changes[dominated_idx].new_content = new_content
+      end
+    end
+
+    state.all_changes = vim.deepcopy(monitor.changes)
+    state.filtered_changes = state.all_changes
+    state.summary = state.generate_summary(state.all_changes)
+
+    refresh_ui(state, { show_empty_message = true })
+
+    if state.on_revert then state.on_revert(state.all_changes, state.checkpoints) end
   end
-  local buf_lines = api.nvim_buf_line_count(bufnr)
-
-  if target_line > buf_lines then target_line = buf_lines end
-
-  pcall(api.nvim_win_set_cursor, 0, { target_line, 0 })
-  vim.cmd("normal! zz")
 end
 
 -- ============================================================================
@@ -334,38 +513,18 @@ function M.apply_checkpoint_filter(state, checkpoint_idx, mode)
   state.summary = summary
 
   state.selected_file_idx = 1
-  render.render_file_list(state.files_buf, state.ns, summary.files, summary.by_file, state.selected_file_idx)
-  render.render_checkpoints(state.checkpoints_buf, state.ns, state.checkpoints, state.all_changes, checkpoint_idx)
-
-  if #summary.files > 0 then
-    pcall(api.nvim_win_set_cursor, state.files_win, { 1, 0 })
-    M.update_preview(state, 1)
-  else
-    set_option("modifiable", true, { buf = state.right_buf })
-    api.nvim_buf_set_lines(state.right_buf, 0, -1, false, { "", "No changes at this checkpoint", "" })
-    set_option("modifiable", false, { buf = state.right_buf })
-  end
+  refresh_ui(state, { selected_checkpoint_idx = checkpoint_idx, show_empty_message = true })
 end
 
 ---Reset to show all changes
 ---@param state table
 function M.reset_checkpoint_filter(state)
-  local render = require("fs-monitor.diff.render")
-
   state.selected_checkpoint_idx = nil
   state.filtered_changes = state.all_changes
-
-  local summary = state.generate_summary(state.all_changes)
-  state.summary = summary
-
+  state.summary = state.generate_summary(state.all_changes)
   state.selected_file_idx = 1
-  render.render_file_list(state.files_buf, state.ns, summary.files, summary.by_file, state.selected_file_idx)
-  render.render_checkpoints(state.checkpoints_buf, state.ns, state.checkpoints, state.all_changes, nil)
 
-  if #summary.files > 0 then
-    pcall(api.nvim_win_set_cursor, state.files_win, { 1, 0 })
-    M.update_preview(state, 1)
-  end
+  refresh_ui(state)
 end
 
 -- ============================================================================
@@ -435,22 +594,7 @@ function M.revert_to_checkpoint(state, checkpoint_idx)
   state.selected_file_idx = 1
   state.selected_checkpoint_idx = nil
 
-  set_option("modifiable", true, { buf = state.files_buf })
-  render.render_file_list(state.files_buf, state.ns, summary.files, summary.by_file, state.selected_file_idx)
-  set_option("modifiable", false, { buf = state.files_buf })
-
-  set_option("modifiable", true, { buf = state.checkpoints_buf })
-  render.render_checkpoints(state.checkpoints_buf, state.ns, state.checkpoints, state.all_changes, nil)
-  set_option("modifiable", false, { buf = state.checkpoints_buf })
-
-  if #summary.files > 0 then
-    pcall(api.nvim_win_set_cursor, state.files_win, { 1, 0 })
-    M.update_preview(state, 1)
-  else
-    set_option("modifiable", true, { buf = state.right_buf })
-    api.nvim_buf_set_lines(state.right_buf, 0, -1, false, { "", "No changes remaining", "" })
-    set_option("modifiable", false, { buf = state.right_buf })
-  end
+  refresh_ui(state, { show_empty_message = true })
 
   local msg = string.format("Reverted %d file(s) to %s", result.reverted_count, target_label)
   if result.error_count > 0 then msg = msg .. string.format(" (%d errors)", result.error_count) end
@@ -525,12 +669,17 @@ local function generate_help_lines()
     string.format("- **%s**: %s", km.cycle_focus.key, km.cycle_focus.desc),
     string.format("- **%s**: %s", km.toggle_preview.key, km.toggle_preview.desc),
     string.format("- **%s**: %s", km.toggle_fullscreen.key, km.toggle_fullscreen.desc),
+    string.format("- **%s**: %s", km.toggle_word_diff.key, km.toggle_word_diff.desc),
     "",
     "## Navigation",
     string.format("- **%s** / **%s**: Next/Prev file", km.next_file_alt.key, km.prev_file_alt.key),
     string.format("- **%s** / **%s**: Next/Prev hunk", km.next_hunk.key, km.prev_hunk.key),
     string.format("- **%s** / **%s**: Next/Prev file (preview)", km.next_file.key, km.prev_file.key),
-    string.format("- **%s** / **%s**: %s", km.goto_file.key, km.goto_file_alt.key, km.goto_file.desc),
+    string.format("- **%s**: %s (files window)", km.goto_file.key, km.goto_file.desc),
+    string.format("- **%s** / **%s**: %s (preview)", km.goto_hunk.key, km.goto_hunk_alt.key, km.goto_hunk.desc),
+    "",
+    "## Actions",
+    string.format("- **%s**: %s", km.revert_hunk.key, km.revert_hunk.desc),
     "",
     "## Checkpoints",
     string.format("- **%s**: %s", km.view_checkpoint.key, km.view_checkpoint.desc),
@@ -681,6 +830,19 @@ function M.toggle_fullscreen(state)
   end
 end
 
+---Toggle word-level diff highlighting
+---@param state table
+function M.toggle_word_diff(state)
+  local util = require("fs-monitor.utils.util")
+
+  state.word_diff = not state.word_diff
+
+  if state.selected_file_idx and #state.summary.files > 0 then M.update_preview(state, state.selected_file_idx) end
+
+  local status = state.word_diff and "enabled" or "disabled"
+  util.notify(string.format("Word diff %s", status), vim.log.levels.INFO)
+end
+
 -- ============================================================================
 -- BUFFER & WINDOW CREATION
 -- ============================================================================
@@ -780,6 +942,8 @@ function M.create_windows(buffers, geom)
   ui.set_winbar(right_win, {
     { keys = km.toggle_preview.key, desc = km.toggle_preview.desc },
     { keys = km.toggle_fullscreen.key, desc = km.toggle_fullscreen.desc },
+    { keys = km.toggle_word_diff.key, desc = "Word" },
+    { keys = km.revert_hunk.key, desc = "Revert" },
     { keys = km.next_hunk.key .. "/" .. km.prev_hunk.key, desc = "Hunk" },
     { keys = km.goto_file.key, desc = "File" },
     { keys = km.next_file.key .. "/" .. km.prev_file.key, desc = "Nav" },
@@ -825,6 +989,7 @@ function M.setup_keymaps(state)
     { km.toggle_help.key, function() M.toggle_help(state) end, km.toggle_help.desc },
     { km.toggle_preview.key, function() M.toggle_preview_only(state) end, km.toggle_preview.desc },
     { km.toggle_fullscreen.key, function() M.toggle_fullscreen(state) end, km.toggle_fullscreen.desc },
+    { km.toggle_word_diff.key, function() M.toggle_word_diff(state) end, km.toggle_word_diff.desc },
     -- stylua: ignore end
   }
 
@@ -839,6 +1004,7 @@ function M.setup_keymaps(state)
     { km.prev_file.key, function() M.navigate_files(state, -1) end, km.prev_file.desc },
     { km.next_file_alt.key, function() M.navigate_files(state, 1) end, km.next_file_alt.desc },
     { km.prev_file_alt.key, function() M.navigate_files(state, -1) end, km.prev_file_alt.desc },
+    { km.goto_file.key, function() M.goto_file_in_editor(state) end, km.goto_file.desc },
     -- stylua: ignore end
     {
       km.cycle_focus.key,
@@ -912,10 +1078,12 @@ function M.setup_keymaps(state)
     { key = km.cycle_focus.key, callback = function() api.nvim_set_current_win(state.files_win) end, desc = km.cycle_focus.desc, },
     { key = km.next_file.key, callback = function() M.navigate_files(state, 1) end, desc = km.next_file.desc, },
     { key = km.prev_file.key, callback = function() M.navigate_files(state, -1) end, desc = km.prev_file.desc, },
-    { key = km.goto_file.key, callback = function() M.jump_to_file_line(state) end, desc = km.goto_file.desc },
-    { key = km.goto_file_alt.key, callback = function() M.jump_to_file_line(state) end, desc = km.goto_file_alt.desc },
+    { key = km.goto_hunk.key, callback = function() M.jump_to_file_line(state) end, desc = km.goto_hunk.desc },
+    { key = km.goto_hunk_alt.key, callback = function() M.jump_to_file_line(state) end, desc = km.goto_hunk_alt.desc },
     { key = km.next_hunk.key, callback = function() M.jump_next_hunk(state) end, desc = km.next_hunk.desc },
     { key = km.prev_hunk.key, callback = function() M.jump_prev_hunk(state) end, desc = km.prev_hunk.desc },
+    { key = km.toggle_word_diff.key, callback = function() M.toggle_word_diff(state) end, desc = km.toggle_word_diff.desc },
+    { key = km.revert_hunk.key, callback = function() M.revert_current_hunk(state) end, desc = km.revert_hunk.desc },
     -- stylua: ignore end
   }
 
@@ -945,7 +1113,15 @@ function M.setup_autocmds(state)
       if line > 0 and line <= #state.summary.files then
         state.selected_file_idx = line
         M.update_preview(state, line)
-        render.render_file_list(state.files_buf, state.ns, state.summary.files, state.summary.by_file, line)
+        set_option("modifiable", true, { buf = state.files_buf })
+        render.render_file_list({
+          buf = state.files_buf,
+          ns = state.ns,
+          files = state.summary.files,
+          by_file = state.summary.by_file,
+          selected_idx = line,
+        })
+        set_option("modifiable", false, { buf = state.files_buf })
       end
     end,
   })
