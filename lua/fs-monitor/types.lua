@@ -14,6 +14,8 @@
 ---@field auto_detected? boolean Whether change was auto-detected
 ---@field all_tools? string[] All tools attributed to this change
 ---@field old_path? string Old path for renamed files
+---@field ino? number Inode number
+---@field dev? number Device ID
 
 ---@class FSMonitor.Change
 ---@field path string Relative file path

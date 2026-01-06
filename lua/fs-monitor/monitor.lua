@@ -52,6 +52,7 @@ local DEFAULT_MAX_FILE_SIZE = 1024 * 1024 * 2 -- 2MB
 local DEFAULT_MAX_PREPOPULATE_FILES = 2000
 local DEFAULT_MAX_DEPTH = 6
 local DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 50 -- 50MB total cache limit
+local RENAME_DETECTION_WINDOW = 2000000000 -- 2seconds
 
 ---Create a new FSMonitor instance
 ---@param opts? { session_id?: string, debounce_ms?: number, max_file_size?: number, max_prepopulate_files?: number, max_depth?: number, max_cache_bytes?: number, ignore_patterns?: string[], respect_gitignore?: boolean }
@@ -156,7 +157,7 @@ end
 
 ---Read file content asynchronously
 ---@param filepath string
----@param callback fun(content: string|nil, err: string|nil)
+---@param callback fun(content: string|nil, err: string|nil, stat?: table)
 function FSMonitor:_read_file_async(filepath, callback)
   uv.fs_open(filepath, "r", 438, function(err_open, fd)
     if err_open then return callback(nil, err_open) end
@@ -187,18 +188,14 @@ function FSMonitor:_read_file_async(filepath, callback)
       uv.fs_read(fd, stat.size, 0, function(err_read, data)
         uv.fs_close(fd)
 
-        if err_read then return callback(nil, err_read) end
+        if err_read then return callback(nil, err_read, nil) end
+        if data and is_binary_content(data) then return callback(nil, "Binary file", nil) end
 
-        if data and is_binary_content(data) then return callback(nil, "Binary file") end
-
-        callback(data or "", nil)
+        callback(data or "", nil, { ino = stat.ino, dev = stat.dev })
       end)
     end)
   end)
 end
-
--- Time window for rename detection (2 seconds in nanoseconds)
-local RENAME_DETECTION_WINDOW = 2000000000
 
 ---Simple hash for content comparison (first + last 1KB + length)
 ---@param content string
@@ -211,17 +208,41 @@ local function content_hash(content)
   return fmt("%d:%s:%s", len, first, last)
 end
 
----Check if a created file might be a rename of a recently deleted file
+---Check if a created file is a rename by matching inode
 ---@param self FSMonitor.Monitor
 ---@param new_change FSMonitor.Change
 ---@return FSMonitor.Change|nil deleted_change The matching deleted change, or nil
-local function detect_rename(self, new_change)
-  if new_change.kind ~= "created" or not new_change.new_content then return nil end
+local function _detect_rename_by_inode(self, new_change)
+  local ino = new_change.metadata and new_change.metadata.ino
+  local dev = new_change.metadata and new_change.metadata.dev
+  if not ino or not dev then return nil end
+
+  for i = #self.changes, 1, -1 do
+    local existing = self.changes[i]
+
+    if
+      existing.kind == "deleted"
+      and existing.metadata
+      and existing.metadata.ino == ino
+      and existing.metadata.dev == dev
+    then
+      return existing
+    end
+  end
+
+  return nil
+end
+
+---Check if a created file is a rename by matching content hash
+---@param self FSMonitor.Monitor
+---@param new_change FSMonitor.Change
+---@return FSMonitor.Change|nil deleted_change The matching deleted change, or nil
+local function _detect_rename_by_hash(self, new_change)
+  if not new_change.new_content then return nil end
 
   local new_hash = content_hash(new_change.new_content)
   local current_time = new_change.timestamp
 
-  -- Look for recent deleted files with matching content
   for i = #self.changes, 1, -1 do
     local existing = self.changes[i]
 
@@ -235,6 +256,19 @@ local function detect_rename(self, new_change)
   end
 
   return nil
+end
+
+---Check if a created file might be a rename of a recently deleted file
+---@param self FSMonitor.Monitor
+---@param new_change FSMonitor.Change
+---@return FSMonitor.Change|nil deleted_change The matching deleted change, or nil
+local function _detect_rename(self, new_change)
+  if new_change.kind ~= "created" then return nil end
+
+  local inode_match = _detect_rename_by_inode(self, new_change)
+  if inode_match then return inode_match end
+
+  return _detect_rename_by_hash(self, new_change)
 end
 
 ---Register a change in the changes list
@@ -260,7 +294,7 @@ function FSMonitor:_register_change(change)
 
   if duplicate then return end
 
-  local deleted_match = detect_rename(self, change)
+  local deleted_match = _detect_rename(self, change)
   if deleted_match then
     -- Convert delete + create into a rename
     -- Remove the deleted change from the list
@@ -333,7 +367,7 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
   local relative_path = self:_get_relative_path(path, watch.root_path)
   local cached_content = lru.get(watch.cache, relative_path)
 
-  self:_read_file_async(path, function(new_content, err)
+  self:_read_file_async(path, function(new_content, err, stat)
     vim.schedule(function()
       if not self.watches[watch_id] or not self.watches[watch_id].enabled then return end
 
@@ -347,7 +381,10 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
             new_content = nil,
             timestamp = uv.hrtime(),
             tool_name = watch.tool_name,
-            metadata = {},
+            metadata = {
+              ino = stat and stat.ino,
+              dev = stat and stat.dev,
+            },
           })
         end
         if on_complete then on_complete() end
@@ -373,6 +410,8 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
             metadata = {
               old_size = #cached_content,
               new_size = #new_content,
+              ino = stat and stat.ino,
+              dev = stat and stat.dev,
             },
           })
         end
@@ -387,6 +426,8 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
           tool_name = watch.tool_name,
           metadata = {
             size = #new_content,
+            ino = stat and stat.ino,
+            dev = stat and stat.dev,
           },
         })
       end
