@@ -1,6 +1,7 @@
 # fs-monitor.nvim
 
 Lightweight, real-time filesystem monitoring for Neovim. Track file changes made by AI/LLM tools during code generation sessions with checkpoint-based revert support.
+
 Originally developed as a PR for CodeCompanion.nvim. For earlier history, see [PR #2281](https://github.com/olimorris/codecompanion.nvim/pull/2281).
 
 ## Features
