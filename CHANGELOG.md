@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/bassamsdata/fs-monitor.nvim/compare/v1.0.0...v1.1.0) (2026-01-06)
+
+
+### Features
+
+* **diff:** Adding word-level diffing functionality ([f96b1f5](https://github.com/bassamsdata/fs-monitor.nvim/commit/f96b1f570775091ec5653843eff22cd42f07575b))
+* **preview:** Add ability to revert hunks and display hunk numbers in preview ([964bc2e](https://github.com/bassamsdata/fs-monitor.nvim/commit/964bc2e13edb8917718c374ad28120fbfac644f6))
+
 ## 1.0.0 (2026-01-02)
 
 
