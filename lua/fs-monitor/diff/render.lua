@@ -2,6 +2,9 @@
 local M = {}
 
 local api = vim.api
+local constants = require("fs-monitor.diff.constants")
+
+local LINE_HIGHLIGHT_PRIORITY = constants.LINE_HIGHLIGHT_PRIORITY
 
 ---Get diff configuration
 ---@return FSMonitor.DiffConfig
@@ -27,37 +30,52 @@ function M.pad(line)
 end
 
 ---Format diff lines with extmarks for line numbers, highlights, and signs
----@param buf number
----@param ns number
----@param hunks FSMonitor.Diff.Hunk[]
+---@param args { buf: number, ns: number, hunks: FSMonitor.Diff.Hunk[], word_diff?: boolean }
 ---@return number line_count
 ---@return table line_mappings Table mapping diff buffer line (0-indexed) to file line info
 ---@return table hunk_ranges Array of {start_line, end_line} for each hunk (1-indexed)
-function M.render_diff(buf, ns, hunks)
+function M.render_diff(args)
+  local buf = args.buf
+  local ns = args.ns
+  local hunks = args.hunks
+  local word_diff = args.word_diff
   local cfg = get_config()
   local lines = {}
   local extmarks = {}
   local line_mappings = {}
   local hunk_ranges = {}
   local sign_text = cfg.icons.sign
+  local total_hunks = #hunks
 
   for hunk_idx, hunk in ipairs(hunks) do
-    local hunk_start = #lines + 1
+    local hunk_start_line = #lines + 1
 
-    local header = string.format(
+    local header_base = string.format(
       "@@ -%d,%d +%d,%d @@",
       hunk.original_start,
       hunk.original_count,
       hunk.updated_start,
       hunk.updated_count
     )
+    local hunk_number = string.format(" [%d/%d]", hunk_idx, total_hunks)
+    local header = header_base .. hunk_number
     table.insert(lines, header)
+
+    local header_base_len = #header_base
     table.insert(extmarks, {
       line = #lines - 1,
       col = 0,
       opts = {
-        end_line = #lines,
+        end_col = header_base_len,
         hl_group = "FSMonitorHeader",
+      },
+    })
+    table.insert(extmarks, {
+      line = #lines - 1,
+      col = header_base_len,
+      opts = {
+        end_col = header_base_len + #hunk_number,
+        hl_group = "FSMonitorChangeLineNr",
       },
     })
 
@@ -70,7 +88,11 @@ function M.render_diff(buf, ns, hunks)
         line = #lines - 1,
         col = 0,
         opts = {
-          line_hl_group = "FSMonitorContext",
+          end_row = #lines,
+          end_col = 0,
+          hl_group = "FSMonitorContext",
+          hl_eol = true,
+          priority = LINE_HIGHLIGHT_PRIORITY,
           virt_text = { { line_nr_text, "FSMonitorContextLineNr" } },
           virt_text_pos = "inline",
           hl_mode = "replace",
@@ -91,7 +113,11 @@ function M.render_diff(buf, ns, hunks)
         line = #lines - 1,
         col = 0,
         opts = {
-          line_hl_group = "FSMonitorDelete",
+          end_row = #lines,
+          end_col = 0,
+          hl_group = "FSMonitorDelete",
+          hl_eol = true,
+          priority = LINE_HIGHLIGHT_PRIORITY,
           virt_text = { { line_nr_text, "FSMonitorDeleteLineNr" } },
           virt_text_pos = "inline",
           sign_text = sign_text,
@@ -110,7 +136,11 @@ function M.render_diff(buf, ns, hunks)
         line = #lines - 1,
         col = 0,
         opts = {
-          line_hl_group = "FSMonitorAdd",
+          end_row = #lines,
+          end_col = 0,
+          hl_group = "FSMonitorAdd",
+          hl_eol = true,
+          priority = LINE_HIGHLIGHT_PRIORITY,
           virt_text = { { line_nr_text, "FSMonitorAddLineNr" } },
           virt_text_pos = "inline",
           sign_text = sign_text,
@@ -128,7 +158,11 @@ function M.render_diff(buf, ns, hunks)
         line = #lines - 1,
         col = 0,
         opts = {
-          line_hl_group = "FSMonitorContext",
+          end_row = #lines,
+          end_col = 0,
+          hl_group = "FSMonitorContext",
+          hl_eol = true,
+          priority = LINE_HIGHLIGHT_PRIORITY,
           virt_text = { { line_nr_text, "FSMonitorContextLineNr" } },
           virt_text_pos = "inline",
           sign_text = sign_text,
@@ -137,8 +171,8 @@ function M.render_diff(buf, ns, hunks)
       })
     end
 
-    local hunk_end = #lines
-    table.insert(hunk_ranges, { start_line = hunk_start, end_line = hunk_end })
+    local hunk_end_line = #lines
+    table.insert(hunk_ranges, { start_line = hunk_start_line, end_line = hunk_end_line })
 
     if hunk_idx < #hunks then
       table.insert(lines, "")
@@ -155,16 +189,28 @@ function M.render_diff(buf, ns, hunks)
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   M.apply_extmarks(buf, ns, extmarks)
 
+  if word_diff then
+    local _word_diff = require("fs-monitor.diff.word_diff")
+    _word_diff.apply_word_highlights({
+      bufnr = args.buf,
+      ns_id = args.ns,
+      hunks = args.hunks,
+      line_mappings = line_mappings,
+      hunk_ranges = hunk_ranges,
+    })
+  end
+
   return #lines, line_mappings, hunk_ranges
 end
 
 ---Render file list in files buffer (top left)
----@param buf number
----@param ns number
----@param files string[]
----@param by_file table
----@param selected_idx? number
-function M.render_file_list(buf, ns, files, by_file, selected_idx)
+---@param args { buf: number, ns: number, files: string[], by_file: table, selected_idx?: number }
+function M.render_file_list(args)
+  local buf = args.buf
+  local ns = args.ns
+  local files = args.files
+  local by_file = args.by_file
+  local selected_idx = args.selected_idx
   local cfg = get_config()
   local lines = {}
   local extmarks = {}
@@ -237,12 +283,13 @@ function M.render_file_list(buf, ns, files, by_file, selected_idx)
 end
 
 ---Render checkpoints in checkpoint buffer (bottom left)
----@param buf number
----@param ns number
----@param checkpoints FSMonitor.Checkpoint[]
----@param all_changes FSMonitor.Change[]
----@param selected_idx? number
-function M.render_checkpoints(buf, ns, checkpoints, all_changes, selected_idx)
+---@param args { buf: number, ns: number, checkpoints: FSMonitor.Checkpoint[], all_changes: FSMonitor.Change[], selected_idx?: number }
+function M.render_checkpoints(args)
+  local buf = args.buf
+  local ns = args.ns
+  local checkpoints = args.checkpoints
+  local all_changes = args.all_changes
+  local selected_idx = args.selected_idx
   local util = require("fs-monitor.utils.util")
   local cfg = get_config()
   local lines = {}

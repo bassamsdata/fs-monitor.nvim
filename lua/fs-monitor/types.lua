@@ -94,6 +94,7 @@
 ---@field icons FSMonitor.DiffIcons Icon configuration
 ---@field titles FSMonitor.DiffTitles Window title configuration
 ---@field keymaps FSMonitor.DiffKeymaps Keymap configuration
+---@field word_diff boolean Whether to enable word diff by default
 
 ---@class FSMonitor.DiffIcons
 ---@field created string Icon for created files
@@ -137,6 +138,8 @@
 ---@field view_cumulative FSMonitor.DiffKeymap View accumulated changes
 ---@field revert_checkpoint FSMonitor.DiffKeymap Revert to checkpoint
 ---@field revert_all FSMonitor.DiffKeymap Revert all changes to original
+---@field toggle_word_diff FSMonitor.DiffKeymap Toggle word-level diff highlighting
+---@field revert_hunk FSMonitor.DiffKeymap Revert current hunk
 
 -- ============================================================================
 -- DIFF HUNK TYPES

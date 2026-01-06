@@ -23,7 +23,7 @@ M._opts = {}
 
 ---@type table Default options
 local default_opts = {
-  keymap = "gD",
+  keymap = "gF",
   keymap_description = "Show file system diff (fs-monitor)",
   auto_start = true,
   auto_checkpoint = true,

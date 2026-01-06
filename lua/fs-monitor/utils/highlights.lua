@@ -82,6 +82,14 @@ local function define_highlights()
     },
     FSMonitorHeader = { link = "Title", default = true },
     FSMonitorSummary = { link = "Comment", default = true },
+    FSMonitorDeleteWord = {
+      bg = M.blend(delete_fg, diff_delete_bg, 0.4),
+      default = true,
+    },
+    FSMonitorAddWord = {
+      bg = M.blend(add_fg, diff_add_bg, 0.4),
+      default = true,
+    },
   }
 
   for name, opts in pairs(hl_groups) do
