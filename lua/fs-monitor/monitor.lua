@@ -39,6 +39,7 @@ API Overview:
 local uv = vim.uv
 local lru = require("fs-monitor.utils.lru")
 local gitignore = require("fs-monitor.utils.gitignore")
+local fs = require("fs-monitor.utils.fs")
 local log = require("fs-monitor.log")
 
 local fmt = string.format
@@ -995,47 +996,72 @@ function FSMonitor:tag_changes_in_range(start_time, end_time, tool_name, tool_ar
   end
 end
 
----Safely delete a file with error handling
----@param filepath string
----@return boolean success
----@return string|nil error
-local function safe_delete_file(filepath)
-  local ok, err = pcall(function()
-    local stat = uv.fs_stat(filepath)
-    if stat then os.remove(filepath) end
+---Revert a list of changes in reverse order
+---@param changes FSMonitor.Change[]
+---@param cwd string
+---@return number reverted
+---@return number errors
+---@return string[] modified_files
+function FSMonitor:_revert_changes_list(changes, cwd)
+  local reverted = 0
+  local errors = 0
+  local modified_files_map = {}
+  local dirs_to_check = {}
+
+  local function add_parent_to_check(path)
+    local parent = vim.fs.dirname(path)
+    while parent and parent ~= cwd and #parent > #cwd do
+      dirs_to_check[parent] = true
+      parent = vim.fs.dirname(parent)
+    end
+  end
+
+  for i = #changes, 1, -1 do
+    local change = changes[i]
+    local absolute_path = vim.fs.joinpath(cwd, change.path)
+    local ok, err
+
+    if change.kind == "created" then
+      ok, err = fs.delete_file(absolute_path)
+      if ok then add_parent_to_check(absolute_path) end
+    elseif change.kind == "deleted" then
+      ok, err = fs.write_file(absolute_path, change.old_content)
+    elseif change.kind == "modified" then
+      ok, err = fs.write_file(absolute_path, change.old_content)
+    elseif change.kind == "renamed" then
+      local old_path = change.metadata.old_path
+      local abs_old_path = vim.fs.joinpath(cwd, old_path)
+      ok, err = fs.rename_file(absolute_path, abs_old_path)
+      if ok then
+        add_parent_to_check(absolute_path)
+        modified_files_map[change.metadata.old_path] = true
+      end
+    end
+
+    if ok then
+      reverted = reverted + 1
+      modified_files_map[change.path] = true
+    else
+      log:debug(fmt("FAILED REVERT: %s %s -> %s", change.kind, change.path, (err or "unknown")))
+      errors = errors + 1
+    end
+  end
+
+  -- Directory cleanup
+  local sorted_dirs = vim.tbl_keys(dirs_to_check)
+  table.sort(sorted_dirs, function(a, b)
+    return #a > #b
   end)
-  if not ok then return false, tostring(err) end
-  return true, nil
-end
+  for _, dir in ipairs(sorted_dirs) do
+    fs.delete_dir_if_empty(dir)
+  end
 
----Safely write content to a file with error handling
----@param filepath string
----@param content string
----@return boolean success
----@return string|nil error
-local function safe_write_file(filepath, content)
-  local ok, err = pcall(function()
-    -- Ensure parent directory exists
-    local parent_dir = vim.fs.dirname(filepath)
-    if parent_dir and parent_dir ~= "" then vim.fn.mkdir(parent_dir, "p") end
-
-    local fd = uv.fs_open(filepath, "w", 438)
-    if not fd then error("Failed to open file for writing") end
-
-    local write_ok, write_err = uv.fs_write(fd, content, 0)
-    uv.fs_close(fd)
-
-    if not write_ok then error(write_err or "Failed to write file") end
-  end)
-
-  if not ok then return false, tostring(err) end
-  return true, nil
+  return reverted, errors, vim.tbl_keys(modified_files_map)
 end
 
 ---Revert files to state at a checkpoint
 ---R on checkpoint N: Revert to state AT that checkpoint (keep changes up to and including it)
 ---R on final checkpoint: Do nothing (already at final state)
----@param self FSMonitor.Monitor
 ---@param checkpoint_idx number Index of checkpoint to revert to
 ---@param checkpoints FSMonitor.Checkpoint[] Array of checkpoints
 ---@return table|nil result {new_changes, new_checkpoints, reverted_count, error_count}
@@ -1063,18 +1089,7 @@ function FSMonitor:revert_to_checkpoint(checkpoint_idx, checkpoints)
 
   if #changes_to_revert == 0 then return nil end
 
-  -- Group by file - track the FIRST change AFTER target checkpoint for each file
-  -- That change's old_content represents the state at the target checkpoint
-  local file_actions = {}
-  for _, change in ipairs(changes_to_revert) do
-    if not file_actions[change.path] then
-      file_actions[change.path] = {
-        first_change = change, -- First change after target checkpoint
-      }
-    end
-  end
-
-  local reverted, errors, modified_files = self:_apply_file_reverts(file_actions, cwd)
+  local reverted, errors, modified_files = self:_revert_changes_list(changes_to_revert, cwd)
 
   self:_refresh_modified_buffers(modified_files, cwd)
 
@@ -1096,7 +1111,6 @@ function FSMonitor:revert_to_checkpoint(checkpoint_idx, checkpoints)
 end
 
 ---Revert ALL changes to original state (before any monitoring)
----@param self FSMonitor.Monitor
 ---@param _checkpoints table List of all checkpoints (will be cleared)
 ---@return table|nil result { new_changes, new_checkpoints, reverted_count, error_count } or nil if no changes
 function FSMonitor:revert_to_original(_checkpoints)
@@ -1104,16 +1118,7 @@ function FSMonitor:revert_to_original(_checkpoints)
 
   local cwd = vim.fn.getcwd()
 
-  -- Group by file - track the FIRST change for each file
-  -- That change's old_content represents the original state
-  local file_actions = {}
-  for _, change in ipairs(self.changes) do
-    if not file_actions[change.path] then file_actions[change.path] = {
-      first_change = change,
-    } end
-  end
-
-  local reverted, errors, modified_files = self:_apply_file_reverts(file_actions, cwd)
+  local reverted, errors, modified_files = self:_revert_changes_list(self.changes, cwd)
 
   self:_refresh_modified_buffers(modified_files, cwd)
 
@@ -1129,51 +1134,8 @@ function FSMonitor:revert_to_original(_checkpoints)
   }
 end
 
----Apply file reverts based on file_actions map
----@param file_actions table Map of filepath -> { first_change }
----@param cwd string Current working directory
----@return number reverted Count of successfully reverted files
----@return number errors Count of errors
----@return string[] modified_files List of modified file paths
-function FSMonitor:_apply_file_reverts(file_actions, cwd)
-  local reverted = 0
-  local errors = 0
-  local modified_files = {}
-
-  for filepath, actions in pairs(file_actions) do
-    local first_change = actions.first_change
-    local absolute_path = vim.fs.joinpath(cwd, filepath)
-
-    if first_change.kind == "created" then
-      -- File was created after target state - delete it
-      local ok, _ = safe_delete_file(absolute_path)
-      if ok then
-        reverted = reverted + 1
-        table.insert(modified_files, filepath)
-      else
-        errors = errors + 1
-      end
-    elseif first_change.kind == "modified" or first_change.kind == "deleted" then
-      -- File was modified or deleted - restore to old_content
-      local old_content = first_change.old_content
-      if old_content then
-        local ok, _ = safe_write_file(absolute_path, old_content)
-        if ok then
-          reverted = reverted + 1
-          table.insert(modified_files, filepath)
-        else
-          errors = errors + 1
-        end
-      else
-        errors = errors + 1
-      end
-    end
-  end
-
-  return reverted, errors, modified_files
-end
-
 ---Trigger checktime for any open buffers that were modified
+
 ---@param modified_files string[] List of relative file paths
 ---@param cwd string Current working directory
 function FSMonitor:_refresh_modified_buffers(modified_files, cwd)
