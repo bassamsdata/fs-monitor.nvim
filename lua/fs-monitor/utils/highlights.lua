@@ -1,8 +1,14 @@
+--[[ 
+  File highlights.lua
+  Author: Bassam Data
+  Thakn you for folke snacks.nvim plugin for the blend function.
+]]
 local M = {}
 
 local api = vim.api
+local fmt = string.format
 
----Blend two hex colors
+---Blend two hex colors [[ Credit to folke snack.nvim ]]
 ---@param fg string foreground color (hex format like "#rrggbb")
 ---@param bg string background color (hex format like "#rrggbb")
 ---@param alpha number number between 0 and 1. 0 results in bg, 1 results in fg
@@ -22,14 +28,14 @@ function M.blend(fg, bg, alpha)
     local ret = (alpha * fg_rgb[i] + ((1 - alpha) * bg_rgb[i]))
     return math.floor(math.min(math.max(0, ret), 255) + 0.5)
   end
-  return string.format("#%02x%02x%02x", blend_channel(1), blend_channel(2), blend_channel(3))
+  return fmt("#%02x%02x%02x", blend_channel(1), blend_channel(2), blend_channel(3))
 end
 
 ---Get normal background color from colorscheme
 ---@return string hex color
 function M.get_normal_bg()
   local normal_hl = api.nvim_get_hl(0, { name = "Normal" })
-  if normal_hl.bg then return string.format("#%06x", normal_hl.bg) end
+  if normal_hl.bg then return fmt("#%06x", normal_hl.bg) end
   return vim.o.background == "dark" and "#1e1e2e" or "#f5f5f5"
 end
 
@@ -38,7 +44,7 @@ end
 ---@return string|nil hex color or nil if not found
 function M.get_hl_bg(hl_name)
   local hl = api.nvim_get_hl(0, { name = hl_name, link = false })
-  if hl.bg then return string.format("#%06x", hl.bg) end
+  if hl.bg then return fmt("#%06x", hl.bg) end
   return nil
 end
 
@@ -81,6 +87,10 @@ local function define_highlights()
       default = true,
     },
     FSMonitorHeader = { link = "Title", default = true },
+    FSMonitorSpecial = {
+      fg = api.nvim_get_hl(0, { name = "Title" }).fg and fmt("#%06x", api.nvim_get_hl(0, { name = "Title" }).fg) or nil,
+      default = true,
+    },
     FSMonitorSummary = { link = "Comment", default = true },
     FSMonitorDeleteWord = {
       bg = M.blend(delete_fg, diff_delete_bg, 0.4),

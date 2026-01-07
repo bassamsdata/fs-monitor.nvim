@@ -41,7 +41,8 @@ local default_opts = {
 ---Get chat instance from buffer number
 ---@param bufnr number
 ---@return table|nil chat
-local function get_chat_from_bufnr(bufnr)
+---TODO: use this for goto file funtion so files doesn't open in chat window.
+local function _get_chat_from_bufnr(bufnr)
   local ok, chat_module = pcall(require, "codecompanion.interactions.chat")
   if not ok then
     ok, chat_module = pcall(require, "codecompanion.strategies.chat")
