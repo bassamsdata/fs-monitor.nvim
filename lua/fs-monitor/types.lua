@@ -5,7 +5,7 @@
 -- CHANGE TYPES
 -- ============================================================================
 
----@alias FSMonitor.Change.Kind "created"|"modified"|"deleted"|"renamed"
+---@alias FSMonitor.Change.Kind "created"|"modified"|"deleted"|"renamed"|"transient"
 
 ---@class FSMonitor.Change.Metadata
 ---@field attribution? "confirmed"|"ambiguous"|"unknown" Path validation status
@@ -105,13 +105,10 @@
 ---@field deleted string Icon for deleted files
 ---@field modified string Icon for modified files
 ---@field renamed string Icon for renamed files
+---@field transient string Icon for transient files
 ---@field checkpoint string Icon for checkpoints
 ---@field file_selector string Icon for file selection indicator
 ---@field sign string Sign column character
----@field title_created string Title icon for created files
----@field title_deleted string Title icon for deleted files
----@field title_modified string Title icon for modified files
----@field title_renamed string Title icon for renamed files
 
 ---@class FSMonitor.DiffTitles
 ---@field files string Title for files panel

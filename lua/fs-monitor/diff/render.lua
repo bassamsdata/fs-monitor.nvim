@@ -23,7 +23,7 @@ function Render.new(buf, ns)
     extmarks = {},
     line_mappings = {},
     hunk_ranges = {},
-    cfg = require("fs-monitor.config").diff_options,
+    cfg = require("fs-monitor.config").ui_options,
   }, Render)
 end
 

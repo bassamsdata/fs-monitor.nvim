@@ -64,7 +64,7 @@ end
 ---Get diff configuration
 ---@return FSMonitor.DiffConfig
 local function get_config()
-  return require("fs-monitor.config").diff_options
+  return require("fs-monitor.config").ui_options
 end
 
 -- ============================================================================
@@ -156,7 +156,7 @@ function M.update_preview(state, idx)
     else
       new_lines = { "(empty file)" }
     end
-  elseif net_operation == "deleted" then
+  elseif net_operation == "deleted" or net_operation == "transient" then
     if first_change.old_content then
       old_lines = vim.split(first_change.old_content, "\n", { plain = true })
     else
@@ -187,13 +187,15 @@ function M.update_preview(state, idx)
   end
 
   if api.nvim_win_is_valid(state.right_win) then
-    local title_icon = cfg.icons.title_modified
+    local title_icon = cfg.icons.modified
     if net_operation == "created" then
-      title_icon = cfg.icons.title_created
+      title_icon = cfg.icons.created
     elseif net_operation == "deleted" then
-      title_icon = cfg.icons.title_deleted
+      title_icon = cfg.icons.deleted
     elseif net_operation == "renamed" then
-      title_icon = cfg.icons.title_renamed
+      title_icon = cfg.icons.renamed
+    elseif net_operation == "transient" then
+      title_icon = cfg.icons.transient
     end
     local title_name = vim.fn.fnamemodify(filepath, ":t")
     if net_operation == "renamed" and file_info.old_path then

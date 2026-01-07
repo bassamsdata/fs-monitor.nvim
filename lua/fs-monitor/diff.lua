@@ -8,7 +8,7 @@ local api = vim.api
 ---Get diff configuration
 ---@return FSMonitor.DiffConfig
 local function get_config()
-  return require("fs-monitor.config").diff_options
+  return require("fs-monitor.config").ui_options
 end
 
 -- ============================================================================
@@ -113,6 +113,9 @@ local function determine_net_operation(file_changes)
   local file_exists_now = last_change.kind ~= "deleted"
   local file_existed_before = first_change.kind ~= "created"
 
+  -- Detect transient files (created during monitoring then deleted)
+  if not file_exists_now and not file_existed_before then return "transient" end
+
   if not file_exists_now then
     return "deleted"
   elseif not file_existed_before then
@@ -132,6 +135,7 @@ local function generate_summary(changes)
     modified = 0,
     deleted = 0,
     renamed = 0,
+    transient = 0,
     files = {},
     by_file = {},
   }
@@ -156,6 +160,7 @@ local function generate_summary(changes)
         modified = 0,
         deleted = 0,
         renamed = 0,
+        transient = 0,
         old_path = nil,
       }
       table.insert(summary.files, change.path)
@@ -173,6 +178,8 @@ local function generate_summary(changes)
   for _, filepath in ipairs(summary.files) do
     local file_summary = summary.by_file[filepath]
     file_summary.net_operation = determine_net_operation(file_summary.changes)
+
+    if file_summary.net_operation == "transient" then summary.transient = summary.transient + 1 end
   end
 
   return summary
