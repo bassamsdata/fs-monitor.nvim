@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/bassamsdata/fs-monitor.nvim/compare/v1.1.0...v1.2.0) (2026-01-07)
+
+
+### Features
+
+* **core:** add some ignore options ([ac4b468](https://github.com/bassamsdata/fs-monitor.nvim/commit/ac4b468133385f3c7532f31f83d4999fffa0fa09))
+
 ## [1.1.0](https://github.com/bassamsdata/fs-monitor.nvim/compare/v1.0.0...v1.1.0) (2026-01-06)
 
 
