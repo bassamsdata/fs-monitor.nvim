@@ -11,6 +11,7 @@ M.defaults = {
   max_cache_bytes = 1024 * 1024 * 50, -- 50MB
   ignore_patterns = {},
   respect_gitignore = true,
+  never_ignore = { "TODO.md" },
   debug = false,
   debug_file = nil,
 }

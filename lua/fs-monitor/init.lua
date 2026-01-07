@@ -44,6 +44,7 @@ function M.create_session(opts)
     max_cache_bytes = cfg.max_cache_bytes,
     ignore_patterns = cfg.ignore_patterns,
     respect_gitignore = cfg.respect_gitignore,
+    never_ignore = cfg.never_ignore,
     session_id = session_id,
   })
 
