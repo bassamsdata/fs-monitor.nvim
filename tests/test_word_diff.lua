@@ -172,12 +172,8 @@ T["Word Diff"]["apply_word_highlights adds correct extmarks"] = function()
       context_after = {},
     }
 
-    Render.render_diff({
-      buf = bufnr,
-      ns = ns_id,
-      hunks = { hunk },
-      word_diff = true,
-    })
+    Render.new(bufnr, ns_id):render_diff({ hunk }, true)
+
 
     _G.test_buf = bufnr
     _G.test_ns = ns_id
@@ -238,12 +234,8 @@ T["Word Diff"]["no word highlights when line counts differ in hunk"] = function(
       context_after = {},
     }
 
-    Render.render_diff({
-      buf = bufnr,
-      ns = ns_id,
-      hunks = { hunk },
-      word_diff = true,
-    })
+    Render.new(bufnr, ns_id):render_diff({ hunk }, true)
+
 
     _G.test_buf = bufnr
     _G.test_ns = ns_id
