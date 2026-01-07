@@ -18,52 +18,37 @@ local T = new_set({
           return Monitor.new(opts)
         end
 
-        -- Mock safe_write_file and safe_delete_file for revert tests
-        _G.file_operations = { writes = {}, deletes = {} }
+        -- Mock fs module functions for revert tests
+        _G.file_operations = { writes = {}, deletes = {}, renames = {} }
 
-        function mock_locals(module, func_name, mock_impl)
-          local seen = {}
-          local function search(fn)
-            if seen[fn] then return end
-            seen[fn] = true
+        local fs = require("fs-monitor.utils.fs")
+        local original_write = fs.write_file
+        local original_delete = fs.delete_file
+        local original_rename = fs.rename_file
 
-            local i = 1
-            while true do
-              local name, value = debug.getupvalue(fn, i)
-              if not name then break end
-
-              if name == func_name then
-                debug.setupvalue(fn, i, mock_impl)
-                return true
-              elseif type(value) == "function" then
-                if search(value) then return true end
-              end
-              i = i + 1
-            end
-            return false
-          end
-
-          if module["_apply_file_reverts"] then
-            return search(module["_apply_file_reverts"])
-          end
-          return search(module.revert_to_checkpoint)
-        end
-
-        local mock_write = function(path, content)
+        fs.write_file = function(path, content)
           table.insert(_G.file_operations.writes, { path = path, content = content })
           return true
         end
 
-        local mock_delete = function(path)
+        fs.delete_file = function(path)
           table.insert(_G.file_operations.deletes, { path = path })
           return true
         end
 
-        mock_locals(Monitor, "safe_write_file", mock_write)
-        mock_locals(Monitor, "safe_delete_file", mock_delete)
+        fs.rename_file = function(old_path, new_path)
+          table.insert(_G.file_operations.renames, { old_path = old_path, new_path = new_path })
+          return true
+        end
 
         _G.reset_file_operations = function()
-          _G.file_operations = { writes = {}, deletes = {} }
+          _G.file_operations = { writes = {}, deletes = {}, renames = {} }
+        end
+
+        _G.restore_fs_functions = function()
+          fs.write_file = original_write
+          fs.delete_file = original_delete
+          fs.rename_file = original_rename
         end
       ]])
     end,
@@ -445,6 +430,105 @@ T["Monitor"]["Revert"]["handles empty checkpoints list"] = function()
   ]])
 
   h.eq(vim.NIL, child.lua_get("_G.result"))
+end
+
+T["Monitor"]["Revert"]["handles transient files (created then deleted)"] = function()
+  child.lua([[
+    _G.reset_file_operations()
+    local m = Monitor.new()
+
+    -- Simulate: File created and then deleted (transient)
+    m.changes = {
+      { path = "temp.txt", kind = "created", new_content = "temp content", timestamp = 100, tool_name = "workspace", metadata = {} },
+      { path = "temp.txt", kind = "deleted", old_content = "temp content", timestamp = 200, tool_name = "workspace", metadata = {} },
+    }
+
+    local checkpoints = {
+      { timestamp = 150, change_count = 1, label = "After create" },
+      { timestamp = 250, change_count = 2, label = "After delete" },
+    }
+
+    -- Revert to original (undo everything)
+    local result = m:revert_to_original(checkpoints)
+    _G.result = result
+  ]])
+
+  local result = child.lua_get("_G.result")
+  h.expect_not_nil(result, "revert_to_original should return result")
+  h.eq(2, result.reverted_count, "should revert both changes")
+  h.eq(0, result.error_count, "should have no errors")
+
+  local writes = child.lua_get("_G.file_operations.writes")
+  local deletes = child.lua_get("_G.file_operations.deletes")
+
+  -- Reverting deleted → writes file, reverting created → deletes file
+  h.eq(1, #writes, "should write once (restore deleted file)")
+  h.eq(1, #deletes, "should delete once (undo creation)")
+  h.expect_contains("temp.txt", writes[1].path, "should restore temp.txt")
+  h.expect_contains("temp.txt", deletes[1].path, "should delete temp.txt")
+end
+
+T["Monitor"]["Revert"]["handles multiple transient files"] = function()
+  child.lua([[
+    _G.reset_file_operations()
+    local m = Monitor.new()
+
+    -- Simulate: Multiple temp files created and deleted
+    m.changes = {
+      { path = "temp1.txt", kind = "created", new_content = "temp1", timestamp = 100, tool_name = "workspace", metadata = {} },
+      { path = "temp2.txt", kind = "created", new_content = "temp2", timestamp = 150, tool_name = "workspace", metadata = {} },
+      { path = "temp1.txt", kind = "deleted", old_content = "temp1", timestamp = 200, tool_name = "workspace", metadata = {} },
+      { path = "temp2.txt", kind = "deleted", old_content = "temp2", timestamp = 250, tool_name = "workspace", metadata = {} },
+    }
+
+    local checkpoints = {
+      { timestamp = 300, change_count = 4, label = "All done" },
+    }
+
+    local result = m:revert_to_original(checkpoints)
+    _G.result = result
+  ]])
+
+  local result = child.lua_get("_G.result")
+  h.eq(4, result.reverted_count, "should revert all 4 changes")
+
+  local writes = child.lua_get("_G.file_operations.writes")
+  local deletes = child.lua_get("_G.file_operations.deletes")
+
+  h.eq(2, #writes, "should restore both deleted files")
+  h.eq(2, #deletes, "should delete both created files")
+end
+
+T["Monitor"]["Revert"]["transient with checkpoint between create and delete"] = function()
+  child.lua([[
+    _G.reset_file_operations()
+    local m = Monitor.new()
+
+    -- Simulate: File created at CP1, deleted at CP2
+    m.changes = {
+      { path = "temp.txt", kind = "created", new_content = "content", timestamp = 100, tool_name = "workspace", metadata = {} },
+      { path = "temp.txt", kind = "deleted", old_content = "content", timestamp = 300, tool_name = "workspace", metadata = {} },
+    }
+
+    local checkpoints = {
+      { timestamp = 200, change_count = 1, label = "After create" },
+      { timestamp = 400, change_count = 2, label = "After delete" },
+    }
+
+    -- Revert to CP1 (undo deletion only)
+    local result = m:revert_to_checkpoint(1, checkpoints)
+    _G.result = result
+  ]])
+
+  local result = child.lua_get("_G.result")
+  h.eq(1, result.reverted_count, "should revert only the deletion")
+
+  local writes = child.lua_get("_G.file_operations.writes")
+  local deletes = child.lua_get("_G.file_operations.deletes")
+
+  h.eq(1, #writes, "should restore the deleted file")
+  h.eq(0, #deletes, "should not delete anything yet")
+  h.expect_contains("temp.txt", writes[1].path, "should restore temp.txt")
 end
 
 T["Monitor"]["Checkpoint"] = new_set()

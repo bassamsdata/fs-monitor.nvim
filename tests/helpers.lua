@@ -1,48 +1,36 @@
 local Helpers = {}
 
 -- Expectation helpers
-Helpers.eq = function(a, b)
-  if not vim.deep_equal(a, b) then
-    error(string.format("Expected %s, but got %s", vim.inspect(a), vim.inspect(b)))
-  end
+--- @param desc? string
+Helpers.eq = function(a, b, desc)
+  desc = desc or ""
+  if not vim.deep_equal(a, b) then error(string.format("Expected %s, but got %s", vim.inspect(a), vim.inspect(b))) end
 end
 
 Helpers.not_eq = function(a, b)
   if vim.deep_equal(a, b) then
-    error(
-      string.format("Expected %s and %s to be different", vim.inspect(a), vim.inspect(b))
-    )
+    error(string.format("Expected %s and %s to be different", vim.inspect(a), vim.inspect(b)))
   end
 end
 
-Helpers.expect_contains = function(needle, haystack)
+---@param desc? string
+Helpers.expect_contains = function(needle, haystack, desc)
+  desc = desc or ""
   if not string.find(haystack, needle, 1, true) then
-    error(
-      string.format(
-        "Expected %s to contain %s",
-        vim.inspect(haystack),
-        vim.inspect(needle)
-      )
-    )
+    error(string.format("Expected %s to contain %s", vim.inspect(haystack), vim.inspect(needle)))
   end
 end
 
 Helpers.expect_true = function(value, msg)
-  if not value then
-    error(msg or string.format("Expected true, but got %s", vim.inspect(value)))
-  end
+  if not value then error(msg or string.format("Expected true, but got %s", vim.inspect(value))) end
 end
 
 Helpers.expect_false = function(value, msg)
-  if value then
-    error(msg or string.format("Expected false, but got %s", vim.inspect(value)))
-  end
+  if value then error(msg or string.format("Expected false, but got %s", vim.inspect(value))) end
 end
 
 Helpers.expect_nil = function(value, msg)
-  if value ~= nil then
-    error(msg or string.format("Expected nil, but got %s", vim.inspect(value)))
-  end
+  if value ~= nil then error(msg or string.format("Expected nil, but got %s", vim.inspect(value))) end
 end
 
 Helpers.expect_not_nil = function(value, msg)
@@ -50,15 +38,11 @@ Helpers.expect_not_nil = function(value, msg)
 end
 
 Helpers.expect_gte = function(a, b, msg)
-  if not (a >= b) then
-    error(msg or string.format("Expected %s >= %s", vim.inspect(a), vim.inspect(b)))
-  end
+  if not (a >= b) then error(msg or string.format("Expected %s >= %s", vim.inspect(a), vim.inspect(b))) end
 end
 
 Helpers.expect_gt = function(a, b, msg)
-  if not (a > b) then
-    error(msg or string.format("Expected %s > %s", vim.inspect(a), vim.inspect(b)))
-  end
+  if not (a > b) then error(msg or string.format("Expected %s > %s", vim.inspect(a), vim.inspect(b))) end
 end
 
 Helpers.child_start = function(child)
@@ -128,12 +112,7 @@ Helpers.assert_change_matches = function(change, expected)
   for key, value in pairs(expected) do
     if change[key] ~= value then
       error(
-        string.format(
-          "Change property '%s' expected %s, got %s",
-          key,
-          vim.inspect(value),
-          vim.inspect(change[key])
-        )
+        string.format("Change property '%s' expected %s, got %s", key, vim.inspect(value), vim.inspect(change[key]))
       )
     end
   end
