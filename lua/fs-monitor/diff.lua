@@ -241,20 +241,8 @@ function M.show(changes, checkpoints, opts)
     get_geometry = get_geometry,
   }
 
-  render.render_file_list({
-    buf = state.files_buf,
-    ns = state.ns,
-    files = summary.files,
-    by_file = summary.by_file,
-    selected_idx = state.selected_file_idx,
-  })
-  render.render_checkpoints({
-    buf = state.checkpoints_buf,
-    ns = state.ns,
-    checkpoints = checkpoints,
-    all_changes = changes,
-    selected_idx = state.selected_checkpoint_idx,
-  })
+  render.new(state.files_buf, state.ns):render_file_list(summary.files, summary.by_file, state.selected_file_idx)
+  render.new(state.checkpoints_buf, state.ns):render_checkpoints(checkpoints, changes, state.selected_checkpoint_idx)
 
   actions.setup_keymaps(state)
   actions.setup_autocmds(state)

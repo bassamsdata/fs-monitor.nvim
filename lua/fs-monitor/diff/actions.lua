@@ -1,3 +1,5 @@
+---@module "fs-monitor.types"
+
 ---@class FSMonitor.Diff.Actions
 local M = {}
 
@@ -9,30 +11,22 @@ local set_option = vim.api.nvim_set_option_value
 -- ============================================================================
 
 ---Refresh all UI panels after state changes
----@param state table
+---@param state FSMonitor.Diff.State
 ---@param opts? { selected_checkpoint_idx?: number|nil, show_empty_message?: boolean }
 local function refresh_ui(state, opts)
   opts = opts or {}
   local render = require("fs-monitor.diff.render")
 
   set_option("modifiable", true, { buf = state.files_buf })
-  render.render_file_list({
-    buf = state.files_buf,
-    ns = state.ns,
-    files = state.summary.files,
-    by_file = state.summary.by_file,
-    selected_idx = state.selected_file_idx,
-  })
+  render
+    .new(state.files_buf, state.ns)
+    :render_file_list(state.summary.files, state.summary.by_file, state.selected_file_idx)
   set_option("modifiable", false, { buf = state.files_buf })
 
   set_option("modifiable", true, { buf = state.checkpoints_buf })
-  render.render_checkpoints({
-    buf = state.checkpoints_buf,
-    ns = state.ns,
-    checkpoints = state.checkpoints,
-    all_changes = state.all_changes,
-    selected_idx = opts.selected_checkpoint_idx,
-  })
+  render
+    .new(state.checkpoints_buf, state.ns)
+    :render_checkpoints(state.checkpoints, state.all_changes, opts.selected_checkpoint_idx)
   set_option("modifiable", false, { buf = state.checkpoints_buf })
 
   if #state.summary.files > 0 then
@@ -85,7 +79,7 @@ local function update_win_config(win, config)
 end
 
 ---Close all windows
----@param state table
+---@param state FSMonitor.Diff.State
 ---@param restore_focus? boolean Whether to restore focus to original window (default true)
 function M.close_windows(state, restore_focus)
   if restore_focus == nil then restore_focus = true end
@@ -118,7 +112,7 @@ end
 -- ============================================================================
 
 ---Reapply keymaps to right buffer (needed after filetype changes)
----@param state table
+---@param state FSMonitor.Diff.State
 local function reapply_right_keymaps(state)
   if not state.right_keymaps or not api.nvim_buf_is_valid(state.right_buf) then return end
 
@@ -134,7 +128,7 @@ local function reapply_right_keymaps(state)
 end
 
 ---Update preview for selected file
----@param state table
+---@param state FSMonitor.Diff.State
 ---@param idx number
 function M.update_preview(state, idx)
   local render = require("fs-monitor.diff.render")
@@ -179,12 +173,7 @@ function M.update_preview(state, idx)
 
   set_option("modifiable", true, { buf = state.right_buf })
   api.nvim_buf_clear_namespace(state.right_buf, state.ns, 0, -1)
-  local _, line_mappings, hunk_ranges = render.render_diff({
-    buf = state.right_buf,
-    ns = state.ns,
-    hunks = hunks,
-    word_diff = state.word_diff,
-  })
+  local _, line_mappings, hunk_ranges = render.new(state.right_buf, state.ns):render_diff(hunks, state.word_diff)
   set_option("modifiable", false, { buf = state.right_buf })
 
   state.line_mappings = line_mappings
@@ -223,7 +212,7 @@ function M.update_preview(state, idx)
 end
 
 ---Navigate to next/previous file
----@param state table
+---@param state FSMonitor.Diff.State
 ---@param direction number
 function M.navigate_files(state, direction)
   local render = require("fs-monitor.diff.render")
@@ -243,13 +232,7 @@ function M.navigate_files(state, direction)
 
   M.update_preview(state, new_file_idx)
   set_option("modifiable", true, { buf = state.files_buf })
-  render.render_file_list({
-    buf = state.files_buf,
-    ns = state.ns,
-    files = state.summary.files,
-    by_file = state.summary.by_file,
-    selected_idx = new_file_idx,
-  })
+  render.new(state.files_buf, state.ns):render_file_list(state.summary.files, state.summary.by_file, new_file_idx)
   set_option("modifiable", false, { buf = state.files_buf })
 end
 
@@ -272,7 +255,7 @@ local function get_hunk_content_line(range)
 end
 
 ---Jump to next hunk in diff preview
----@param state table
+---@param state FSMonitor.Diff.State
 function M.jump_next_hunk(state)
   if not api.nvim_win_is_valid(state.right_win) then return end
   if not state.hunk_ranges or #state.hunk_ranges == 0 then return end
@@ -293,7 +276,7 @@ function M.jump_next_hunk(state)
 end
 
 ---Jump to previous hunk in diff preview
----@param state table
+---@param state FSMonitor.Diff.State
 function M.jump_prev_hunk(state)
   if not api.nvim_win_is_valid(state.right_win) then return end
   if not state.hunk_ranges or #state.hunk_ranges == 0 then return end
@@ -324,7 +307,7 @@ function M.jump_prev_hunk(state)
 end
 
 ---Go to the selected file in the editor (from files window)
----@param state table
+---@param state FSMonitor.Diff.State
 function M.goto_file_in_editor(state)
   local filepath = state.summary.files[state.selected_file_idx]
   if not filepath then return end
@@ -337,7 +320,7 @@ function M.goto_file_in_editor(state)
 end
 
 ---Jump from diff preview line to actual file line
----@param state table
+---@param state FSMonitor.Diff.State
 function M.jump_to_file_line(state)
   if not state.current_filepath or not state.line_mappings then return end
 
@@ -374,7 +357,7 @@ end
 -- ============================================================================
 
 ---Revert the hunk under the cursor
----@param state table
+---@param state FSMonitor.Diff.State
 function M.revert_current_hunk(state)
   local util = require("fs-monitor.utils.util")
   local ui = require("fs-monitor.utils.ui")
@@ -483,12 +466,10 @@ end
 -- ============================================================================
 
 ---Filter changes based on checkpoint and mode
----@param state table
+---@param state FSMonitor.Diff.State
 ---@param checkpoint_idx number
 ---@param mode? "cumulative"|"differential"
 function M.apply_checkpoint_filter(state, checkpoint_idx, mode)
-  local render = require("fs-monitor.diff.render")
-
   if checkpoint_idx < 1 or checkpoint_idx > #state.checkpoints then return end
 
   mode = mode or "cumulative"
@@ -517,7 +498,7 @@ function M.apply_checkpoint_filter(state, checkpoint_idx, mode)
 end
 
 ---Reset to show all changes
----@param state table
+---@param state FSMonitor.Diff.State
 function M.reset_checkpoint_filter(state)
   state.selected_checkpoint_idx = nil
   state.filtered_changes = state.all_changes
@@ -532,10 +513,9 @@ end
 -- ============================================================================
 
 ---Revert to state at a checkpoint using FSMonitor
----@param state table
+---@param state FSMonitor.Diff.State
 ---@param checkpoint_idx number
 function M.revert_to_checkpoint(state, checkpoint_idx)
-  local render = require("fs-monitor.diff.render")
   local ui = require("fs-monitor.utils.ui")
   local util = require("fs-monitor.utils.util")
 
@@ -602,7 +582,7 @@ function M.revert_to_checkpoint(state, checkpoint_idx)
 end
 
 ---Revert ALL changes to original state
----@param state table
+---@param state FSMonitor.Diff.State
 function M.revert_to_original(state)
   local ui = require("fs-monitor.utils.ui")
   local util = require("fs-monitor.utils.util")
@@ -661,8 +641,6 @@ local function generate_help_lines()
   local km = cfg.keymaps
 
   return {
-    "# Help",
-    "",
     "## General",
     string.format("- **%s**: %s", km.toggle_help.key, km.toggle_help.desc),
     string.format("- **%s** / **%s**: %s", km.close.key, km.close_alt.key, km.close.desc),
@@ -682,16 +660,16 @@ local function generate_help_lines()
     string.format("- **%s**: %s", km.revert_hunk.key, km.revert_hunk.desc),
     "",
     "## Checkpoints",
-    string.format("- **%s**: %s", km.view_checkpoint.key, km.view_checkpoint.desc),
-    string.format("- **%s**: %s", km.view_cumulative.key, km.view_cumulative.desc),
+    string.format("- **%s**: %s (safe - shows cycle changes)", km.view_checkpoint.key, km.view_checkpoint.desc),
+    string.format("- **%s**: %s (safe - shows accumulated to cycle)", km.view_cumulative.key, km.view_cumulative.desc),
+    string.format("- **%s**: Reset checkpoint filter (safe - resets UI only)", km.reset_filter.key),
     string.format("- **%s**: %s", km.revert_checkpoint.key, km.revert_checkpoint.desc),
-    string.format("- **%s**: %s", km.reset_filter.key, km.reset_filter.desc),
     string.format("- **%s**: %s", km.revert_all.key, km.revert_all.desc),
   }
 end
 
 ---Toggle help window
----@param state table
+---@param state FSMonitor.Diff.State
 function M.toggle_help(state)
   local cfg = get_config()
   if state.help_win and api.nvim_win_is_valid(state.help_win) then
@@ -714,7 +692,7 @@ function M.toggle_help(state)
   local lines = generate_help_lines()
   api.nvim_buf_set_lines(state.help_buf, 0, -1, false, lines)
 
-  state.help_win = api.nvim_open_win(state.help_buf, false, {
+  state.help_win = api.nvim_open_win(state.help_buf, true, {
     relative = "editor",
     row = geom.row,
     col = geom.left_col,
@@ -723,6 +701,8 @@ function M.toggle_help(state)
     style = "minimal",
     border = "rounded",
     zindex = cfg.help_zindex,
+    title = " 󰋖 Help ",
+    title_pos = "center",
   })
 
   vim.wo[state.help_win].wrap = true
@@ -742,7 +722,7 @@ function M.toggle_help(state)
 end
 
 ---Toggle preview-only mode
----@param state table
+---@param state FSMonitor.Diff.State
 function M.toggle_preview_only(state)
   local g = state.get_geometry(state.is_fullscreen)
 
@@ -790,7 +770,7 @@ function M.toggle_preview_only(state)
 end
 
 ---Toggle fullscreen mode
----@param state table
+---@param state FSMonitor.Diff.State
 function M.toggle_fullscreen(state)
   state.is_fullscreen = not state.is_fullscreen
   local g = state.get_geometry(state.is_fullscreen)
@@ -831,7 +811,7 @@ function M.toggle_fullscreen(state)
 end
 
 ---Toggle word-level diff highlighting
----@param state table
+---@param state FSMonitor.Diff.State
 function M.toggle_word_diff(state)
   local util = require("fs-monitor.utils.util")
 
@@ -933,19 +913,24 @@ function M.create_windows(buffers, geom)
   vim.wo[right_win].scrollbind = false
   vim.wo[right_win].winfixbuf = true
 
+  ui.set_winbar(files_win, {
+    { keys = km.cycle_focus.key, desc = "Tab" },
+    { keys = km.goto_file.key, desc = "File" },
+    { keys = km.toggle_help.key, desc = "Help" },
+  })
+
   ui.set_winbar(checkpoints_win, {
-    { keys = km.view_checkpoint.key, desc = km.view_checkpoint.desc },
-    { keys = km.view_cumulative.key, desc = km.view_cumulative.desc },
-    { keys = km.revert_checkpoint.key, desc = km.revert_checkpoint.desc },
+    { keys = km.view_checkpoint.key, desc = "View" },
+    { keys = km.view_cumulative.key, desc = "Accum" },
+    { keys = km.revert_checkpoint.key, desc = "Revert" },
   })
 
   ui.set_winbar(right_win, {
     { keys = km.toggle_preview.key, desc = km.toggle_preview.desc },
     { keys = km.toggle_fullscreen.key, desc = km.toggle_fullscreen.desc },
-    { keys = km.toggle_word_diff.key, desc = "Word" },
+    { keys = km.toggle_word_diff.key, desc = "Diff-Word" },
     { keys = km.revert_hunk.key, desc = "Revert" },
     { keys = km.next_hunk.key .. "/" .. km.prev_hunk.key, desc = "Hunk" },
-    { keys = km.goto_file.key, desc = "File" },
     { keys = km.next_file.key .. "/" .. km.prev_file.key, desc = "Nav" },
     { keys = km.toggle_help.key, desc = "Help" },
   })
@@ -977,7 +962,7 @@ local function set_keymap(buf, key, callback, desc)
 end
 
 ---Setup keymaps for all buffers
----@param state table
+---@param state FSMonitor.Diff.State
 function M.setup_keymaps(state)
   local cfg = get_config()
   local km = cfg.keymaps
@@ -1097,7 +1082,7 @@ end
 -- ============================================================================
 
 ---Setup autocmds for the diff viewer
----@param state table
+---@param state FSMonitor.Diff.State
 function M.setup_autocmds(state)
   local render = require("fs-monitor.diff.render")
 
@@ -1114,13 +1099,7 @@ function M.setup_autocmds(state)
         state.selected_file_idx = line
         M.update_preview(state, line)
         set_option("modifiable", true, { buf = state.files_buf })
-        render.render_file_list({
-          buf = state.files_buf,
-          ns = state.ns,
-          files = state.summary.files,
-          by_file = state.summary.by_file,
-          selected_idx = line,
-        })
+        render.new(state.files_buf, state.ns):render_file_list(state.summary.files, state.summary.by_file, line)
         set_option("modifiable", false, { buf = state.files_buf })
       end
     end,
