@@ -1,342 +1,263 @@
----@class FSMonitor.Diff.Render
-local M = {}
+---@module "fs-monitor.types"
+
+---@class FSMonitor.Render
+local Render = {}
 
 local api = vim.api
 local constants = require("fs-monitor.diff.constants")
+local fmt = string.format
 
 local LINE_HIGHLIGHT_PRIORITY = constants.LINE_HIGHLIGHT_PRIORITY
 
----Get diff configuration
----@return FSMonitor.DiffConfig
-local function get_config()
-  return require("fs-monitor.config").diff_options
-end
+Render.__index = Render
 
----Apply extmarks to buffer
+---Create a new render instance
 ---@param buf number
 ---@param ns number
----@param extmarks table[]
-function M.apply_extmarks(buf, ns, extmarks)
-  for _, mark in ipairs(extmarks) do
-    pcall(api.nvim_buf_set_extmark, buf, ns, mark.line, mark.col, mark.opts)
+---@return FSMonitor.Render
+function Render.new(buf, ns)
+  return setmetatable({
+    buf = buf,
+    ns = ns,
+    lines = {},
+    extmarks = {},
+    line_mappings = {},
+    hunk_ranges = {},
+    cfg = require("fs-monitor.config").diff_options,
+  }, Render)
+end
+
+---Add a line to the render
+---@private
+---@param line string
+---@param mapping? table
+---@return number (0-based)
+function Render:_add_line(line, mapping)
+  table.insert(self.lines, line == "" and " " or line)
+  if mapping then self.line_mappings[#self.lines - 1] = mapping end
+  return #self.lines - 1
+end
+
+---Add an extmark to the current or specified line
+---@private
+---@param opts table Extmark options
+---@param line_idx? number (0-based), defaults to current line
+function Render:_add_mark(opts, line_idx)
+  local col = opts.col or 0
+  local extmark_opts = vim.tbl_extend("force", {}, opts)
+  extmark_opts.col = nil
+
+  table.insert(self.extmarks, {
+    line = line_idx or (#self.lines - 1),
+    col = col,
+    opts = extmark_opts,
+  })
+end
+
+---Apply the rendered lines and extmarks to the buffer
+---@private
+function Render:_apply()
+  api.nvim_buf_set_lines(self.buf, 0, -1, false, self.lines)
+  for _, mark in ipairs(self.extmarks) do
+    pcall(api.nvim_buf_set_extmark, self.buf, self.ns, mark.line, mark.col, mark.opts)
   end
 end
 
----Pad empty lines to prevent cursor jumping to column 0
----@param line string
----@return string
-function M.pad(line)
-  return line == "" and " " or line
+---Render context lines
+---@private
+---@param lines string[]
+---@param start_nr number
+---@param sign_text string
+function Render:_render_context(lines, start_nr, sign_text)
+  for idx, line in ipairs(lines) do
+    local line_nr = start_nr + idx - 1
+    self:_add_line(line, { original_line = line_nr, updated_line = line_nr, type = "context" })
+    self:_add_mark({
+      end_row = #self.lines,
+      end_col = 0,
+      hl_group = "FSMonitorContext",
+      hl_eol = true,
+      priority = LINE_HIGHLIGHT_PRIORITY,
+      virt_text = { { fmt("%4d  %4d ", line_nr, line_nr), "FSMonitorContextLineNr" } },
+      virt_text_pos = "inline",
+      hl_mode = "replace",
+      sign_text = sign_text,
+      sign_hl_group = "FSMonitorContextLineNr",
+    })
+  end
 end
 
----Format diff lines with extmarks for line numbers, highlights, and signs
----@param args { buf: number, ns: number, hunks: FSMonitor.Diff.Hunk[], word_diff?: boolean }
+---Render diff lines (added/removed)
+---@private
+---@param lines string[]
+---@param start_nr number
+---@param type "added"|"removed"
+---@param sign_text string
+---@param is_modified boolean
+function Render:_render_diff_lines(lines, start_nr, type, sign_text, is_modified)
+  local is_removed = type == "removed"
+  local hl_group = is_removed and "FSMonitorDelete" or "FSMonitorAdd"
+  local nr_hl = is_removed and "FSMonitorDeleteLineNr" or "FSMonitorAddLineNr"
+  local sign_hl = is_modified and "FSMonitorChangeLineNr" or nr_hl
+
+  for idx, line in ipairs(lines) do
+    local line_nr = start_nr + idx - 1
+    local mapping = {
+      original_line = is_removed and line_nr or nil,
+      updated_line = not is_removed and line_nr or nil,
+      type = type,
+    }
+
+    self:_add_line(line, mapping)
+    self:_add_mark({
+      end_row = #self.lines,
+      end_col = 0,
+      hl_group = hl_group,
+      hl_eol = true,
+      priority = LINE_HIGHLIGHT_PRIORITY,
+      virt_text = {
+        {
+          is_removed and fmt("%4d       ", line_nr) or fmt("      %4d ", line_nr),
+          nr_hl,
+        },
+      },
+      virt_text_pos = "inline",
+      sign_text = sign_text,
+      sign_hl_group = sign_hl,
+    })
+  end
+end
+
+---Render the main diff view
+---@param hunks FSMonitor.Diff.Hunk[]
+---@param word_diff? boolean
 ---@return number line_count
----@return table line_mappings Table mapping diff buffer line (0-indexed) to file line info
----@return table hunk_ranges Array of {start_line, end_line} for each hunk (1-indexed)
-function M.render_diff(args)
-  local buf = args.buf
-  local ns = args.ns
-  local hunks = args.hunks
-  local word_diff = args.word_diff
-  local cfg = get_config()
-  local lines = {}
-  local extmarks = {}
-  local line_mappings = {}
-  local hunk_ranges = {}
-  local sign_text = cfg.icons.sign
+---@return table line_mappings
+---@return table hunk_ranges
+function Render:render_diff(hunks, word_diff)
+  local sign_text = self.cfg.icons.sign
   local total_hunks = #hunks
 
   for hunk_idx, hunk in ipairs(hunks) do
-    local hunk_start_line = #lines + 1
+    local hunk_start_line = #self.lines + 1
 
-    local header_base = string.format(
-      "@@ -%d,%d +%d,%d @@",
-      hunk.original_start,
-      hunk.original_count,
-      hunk.updated_start,
-      hunk.updated_count
-    )
-    local hunk_number = string.format(" [%d/%d]", hunk_idx, total_hunks)
+    local header_base =
+      fmt("@@ -%d,%d +%d,%d @@", hunk.original_start, hunk.original_count, hunk.updated_start, hunk.updated_count)
+    local hunk_number = fmt(" [%d/%d]", hunk_idx, total_hunks)
     local header = header_base .. hunk_number
-    table.insert(lines, header)
 
-    local header_base_len = #header_base
-    table.insert(extmarks, {
-      line = #lines - 1,
-      col = 0,
-      opts = {
-        end_col = header_base_len,
-        hl_group = "FSMonitorHeader",
-      },
-    })
-    table.insert(extmarks, {
-      line = #lines - 1,
-      col = header_base_len,
-      opts = {
-        end_col = header_base_len + #hunk_number,
-        hl_group = "FSMonitorChangeLineNr",
-      },
+    self:_add_line(header)
+    self:_add_mark({ end_col = #header_base, hl_group = "FSMonitorHeader" })
+    self:_add_mark({
+      col = #header_base,
+      end_col = #header_base + #hunk_number,
+      hl_group = "FSMonitorSpecial",
     })
 
-    for idx, ctx_line in ipairs(hunk.context_before) do
-      local line_nr = hunk.original_start - #hunk.context_before + idx - 1
-      table.insert(lines, M.pad(ctx_line))
-      line_mappings[#lines - 1] = { original_line = line_nr, updated_line = line_nr, type = "context" }
-      local line_nr_text = string.format("%4d  %4d ", line_nr, line_nr)
-      table.insert(extmarks, {
-        line = #lines - 1,
-        col = 0,
-        opts = {
-          end_row = #lines,
-          end_col = 0,
-          hl_group = "FSMonitorContext",
-          hl_eol = true,
-          priority = LINE_HIGHLIGHT_PRIORITY,
-          virt_text = { { line_nr_text, "FSMonitorContextLineNr" } },
-          virt_text_pos = "inline",
-          hl_mode = "replace",
-          sign_text = sign_text,
-          sign_hl_group = "FSMonitorContextLineNr",
-        },
-      })
-    end
+    self:_render_context(hunk.context_before, hunk.original_start - #hunk.context_before, sign_text)
 
-    local is_modified_hunk = #hunk.removed_lines > 0 and #hunk.added_lines > 0
-    for idx, removed_line in ipairs(hunk.removed_lines) do
-      local old_line_nr = hunk.original_start + idx - 1
-      table.insert(lines, M.pad(removed_line))
-      line_mappings[#lines - 1] = { original_line = old_line_nr, updated_line = nil, type = "removed" }
-      local line_nr_text = string.format("%4d       ", old_line_nr)
-      local sign_hl = is_modified_hunk and "FSMonitorChangeLineNr" or "FSMonitorDeleteLineNr"
-      table.insert(extmarks, {
-        line = #lines - 1,
-        col = 0,
-        opts = {
-          end_row = #lines,
-          end_col = 0,
-          hl_group = "FSMonitorDelete",
-          hl_eol = true,
-          priority = LINE_HIGHLIGHT_PRIORITY,
-          virt_text = { { line_nr_text, "FSMonitorDeleteLineNr" } },
-          virt_text_pos = "inline",
-          sign_text = sign_text,
-          sign_hl_group = sign_hl,
-        },
-      })
-    end
+    local is_modified = #hunk.removed_lines > 0 and #hunk.added_lines > 0
+    self:_render_diff_lines(hunk.removed_lines, hunk.original_start, "removed", sign_text, is_modified)
+    self:_render_diff_lines(hunk.added_lines, hunk.updated_start, "added", sign_text, is_modified)
 
-    for idx, added_line in ipairs(hunk.added_lines) do
-      local new_line_nr = hunk.updated_start + idx - 1
-      table.insert(lines, M.pad(added_line))
-      line_mappings[#lines - 1] = { original_line = nil, updated_line = new_line_nr, type = "added" }
-      local line_nr_text = string.format("      %4d ", new_line_nr)
-      local sign_hl = is_modified_hunk and "FSMonitorChangeLineNr" or "FSMonitorAddLineNr"
-      table.insert(extmarks, {
-        line = #lines - 1,
-        col = 0,
-        opts = {
-          end_row = #lines,
-          end_col = 0,
-          hl_group = "FSMonitorAdd",
-          hl_eol = true,
-          priority = LINE_HIGHLIGHT_PRIORITY,
-          virt_text = { { line_nr_text, "FSMonitorAddLineNr" } },
-          virt_text_pos = "inline",
-          sign_text = sign_text,
-          sign_hl_group = sign_hl,
-        },
-      })
-    end
+    self:_render_context(hunk.context_after, hunk.original_start + hunk.original_count, sign_text)
 
-    for idx, ctx_line in ipairs(hunk.context_after) do
-      local line_nr = hunk.original_start + hunk.original_count + idx - 1
-      table.insert(lines, M.pad(ctx_line))
-      line_mappings[#lines - 1] = { original_line = line_nr, updated_line = line_nr, type = "context" }
-      local line_nr_text = string.format("%4d  %4d ", line_nr, line_nr)
-      table.insert(extmarks, {
-        line = #lines - 1,
-        col = 0,
-        opts = {
-          end_row = #lines,
-          end_col = 0,
-          hl_group = "FSMonitorContext",
-          hl_eol = true,
-          priority = LINE_HIGHLIGHT_PRIORITY,
-          virt_text = { { line_nr_text, "FSMonitorContextLineNr" } },
-          virt_text_pos = "inline",
-          sign_text = sign_text,
-          sign_hl_group = "FSMonitorContextLineNr",
-        },
-      })
-    end
-
-    local hunk_end_line = #lines
-    table.insert(hunk_ranges, { start_line = hunk_start_line, end_line = hunk_end_line })
+    table.insert(self.hunk_ranges, { start_line = hunk_start_line, end_line = #self.lines })
 
     if hunk_idx < #hunks then
-      table.insert(lines, "")
-      table.insert(lines, "")
+      self:_add_line("")
+      self:_add_line("")
     end
   end
 
-  if #lines == 0 then
-    table.insert(lines, "")
-    table.insert(lines, "No differences detected")
-    table.insert(lines, "")
+  if #self.lines == 0 then
+    self:_add_line("")
+    self:_add_line("No differences detected")
+    self:_add_line("")
   end
 
-  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  M.apply_extmarks(buf, ns, extmarks)
+  self:_apply()
 
   if word_diff then
-    local _word_diff = require("fs-monitor.diff.word_diff")
-    _word_diff.apply_word_highlights({
-      bufnr = args.buf,
-      ns_id = args.ns,
-      hunks = args.hunks,
-      line_mappings = line_mappings,
-      hunk_ranges = hunk_ranges,
+    require("fs-monitor.diff.word_diff").apply_word_highlights({
+      bufnr = self.buf,
+      ns_id = self.ns,
+      hunks = hunks,
+      line_mappings = self.line_mappings,
+      hunk_ranges = self.hunk_ranges,
     })
   end
 
-  return #lines, line_mappings, hunk_ranges
+  return #self.lines, self.line_mappings, self.hunk_ranges
 end
 
----Render file list in files buffer (top left)
----@param args { buf: number, ns: number, files: string[], by_file: table, selected_idx?: number }
-function M.render_file_list(args)
-  local buf = args.buf
-  local ns = args.ns
-  local files = args.files
-  local by_file = args.by_file
-  local selected_idx = args.selected_idx
-  local cfg = get_config()
-  local lines = {}
-  local extmarks = {}
-
+---Render the file list panel
+---@param files string[]
+---@param by_file table
+---@param selected_idx? number
+function Render:render_file_list(files, by_file, selected_idx)
   for idx, filepath in ipairs(files) do
     local file_info = by_file[filepath]
-    local icon = " "
-
-    if file_info.net_operation == "created" then
-      icon = cfg.icons.created
-    elseif file_info.net_operation == "deleted" then
-      icon = cfg.icons.deleted
-    elseif file_info.net_operation == "modified" then
-      icon = cfg.icons.modified
-    elseif file_info.net_operation == "renamed" then
-      icon = cfg.icons.renamed
-    end
-
-    local prefix = idx == selected_idx and cfg.icons.file_selector or "  "
+    local icon = self.cfg.icons[file_info.net_operation] or " "
+    local prefix = idx == selected_idx and self.cfg.icons.file_selector or "  "
     local name = vim.fn.fnamemodify(filepath, ":t")
     local dir = vim.fn.fnamemodify(filepath, ":h")
-    if dir == "." then
-      dir = ""
-    else
-      dir = dir .. "/"
-    end
+    dir = dir == "." and "" or dir .. "/"
 
     local line
     local dir_with_colon = dir ~= "" and ":" .. dir or ""
     if file_info.net_operation == "renamed" and file_info.old_path then
       local old_name = vim.fn.fnamemodify(file_info.old_path, ":t")
-      line = string.format("%s%s %s ← %s%s", prefix, icon, name, old_name, dir_with_colon)
+      line = fmt("%s%s %s ← %s%s", prefix, icon, name, old_name, dir_with_colon)
     else
-      line = string.format("%s%s %s%s", prefix, icon, name, dir_with_colon)
+      line = fmt("%s%s %s%s", prefix, icon, name, dir_with_colon)
     end
-    table.insert(lines, line)
 
+    self:_add_line(line)
     local name_start = #prefix + #icon + 1
-    local name_end = name_start + #name
-    table.insert(extmarks, {
-      line = #lines - 1,
-      col = name_start,
-      opts = {
-        end_col = name_end,
-        hl_group = "Title",
-      },
-    })
+    self:_add_mark({ col = name_start, end_col = name_start + #name, hl_group = "Title" }, #self.lines - 1)
 
     if dir_with_colon ~= "" then
-      local dir_start
+      local dir_start = name_start + #name
       if file_info.net_operation == "renamed" and file_info.old_path then
-        local old_name = vim.fn.fnamemodify(file_info.old_path, ":t")
-        dir_start = #prefix + #icon + 1 + #name + 3 + #old_name
-      else
-        dir_start = #prefix + #icon + 1 + #name
+        dir_start = dir_start + 3 + #vim.fn.fnamemodify(file_info.old_path, ":t")
       end
-      table.insert(extmarks, {
-        line = #lines - 1,
-        col = dir_start,
-        opts = {
-          end_col = dir_start + #dir_with_colon,
-          hl_group = "Comment",
-        },
-      })
+      self:_add_mark({ col = dir_start, end_col = dir_start + #dir_with_colon, hl_group = "Comment" }, #self.lines - 1)
     end
   end
-
-  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  M.apply_extmarks(buf, ns, extmarks)
+  self:_apply()
 end
 
----Render checkpoints in checkpoint buffer (bottom left)
----@param args { buf: number, ns: number, checkpoints: FSMonitor.Checkpoint[], all_changes: FSMonitor.Change[], selected_idx?: number }
-function M.render_checkpoints(args)
-  local buf = args.buf
-  local ns = args.ns
-  local checkpoints = args.checkpoints
-  local all_changes = args.all_changes
-  local selected_idx = args.selected_idx
-  local util = require("fs-monitor.utils.util")
-  local cfg = get_config()
-  local lines = {}
-  local extmarks = {}
-
+---Render the checkpoints panel
+---@param checkpoints FSMonitor.Checkpoint[]
+---@param all_changes FSMonitor.Change[]
+---@param selected_idx? number
+function Render:render_checkpoints(checkpoints, all_changes, selected_idx)
   if #checkpoints == 0 then
-    table.insert(lines, "No checkpoints yet")
-    table.insert(lines, "")
-    table.insert(lines, "Checkpoints are created after")
-    table.insert(lines, "each LLM response with changes")
+    self:_add_line("No checkpoints yet")
+    self:_add_line("")
+    self:_add_line("Checkpoints are created after")
+    self:_add_line("each LLM response with changes")
   else
+    local util = require("fs-monitor.utils.util")
     for idx, cp in ipairs(checkpoints) do
       local change_count = 0
       for _, change in ipairs(all_changes) do
         if change.timestamp <= cp.timestamp then change_count = change_count + 1 end
       end
 
-      local prefix = idx == selected_idx and cfg.icons.file_selector or "  "
-      local icon = cfg.icons.checkpoint
-      local label
-      if idx == 1 then
-        label = "Initial checkpoint"
-      elseif idx == #checkpoints then
-        label = "Final checkpoint"
-      else
-        label = string.format("Cycle %d", cp.cycle or idx)
-      end
+      local prefix = idx == selected_idx and self.cfg.icons.file_selector or "  "
+      local icon = self.cfg.icons.checkpoint
+      local label = idx == 1 and "Initial checkpoint"
+        or (idx == #checkpoints and "Final checkpoint" or fmt("Cycle %d", cp.cycle or idx))
 
-      local line =
-        string.format("%s%s %s - %d %s", prefix, icon, label, change_count, util.pluralize(change_count, "change"))
-      table.insert(lines, line)
-
+      local line = fmt("%s%s %s - %d %s", prefix, icon, label, change_count, util.pluralize(change_count, "change"))
+      self:_add_line(line)
       local label_start = #prefix + #icon + 1
-      local label_end = label_start + #label
-      table.insert(extmarks, {
-        line = #lines - 1,
-        col = label_start,
-        opts = {
-          end_col = label_end,
-          hl_group = "Title",
-        },
-      })
+      self:_add_mark({ col = label_start, end_col = label_start + #label, hl_group = "Title" })
     end
   end
-
-  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  M.apply_extmarks(buf, ns, extmarks)
+  self:_apply()
 end
 
-return M
+return Render

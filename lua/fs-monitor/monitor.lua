@@ -43,6 +43,7 @@ local log = require("fs-monitor.log")
 
 local fmt = string.format
 
+---@class FSMonitor.Monitor
 local FSMonitor = {}
 FSMonitor.__index = FSMonitor
 
@@ -55,7 +56,7 @@ local DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 50 -- 50MB total cache limit
 local RENAME_DETECTION_WINDOW = 2000000000 -- 2seconds
 
 ---Create a new FSMonitor instance
----@param opts? { session_id?: string, debounce_ms?: number, max_file_size?: number, max_prepopulate_files?: number, max_depth?: number, max_cache_bytes?: number, ignore_patterns?: string[], respect_gitignore?: boolean }
+---@param opts? { session_id?: string, debounce_ms?: number, max_file_size?: number, max_prepopulate_files?: number, max_depth?: number, max_cache_bytes?: number, ignore_patterns?: string[], respect_gitignore?: boolean, never_ignore?: string[] }
 ---@return FSMonitor.Monitor
 function FSMonitor.new(opts)
   opts = opts or {}
@@ -77,6 +78,7 @@ function FSMonitor.new(opts)
     gitignore_loaded = false,
     respect_gitignore = opts.respect_gitignore ~= false,
     custom_ignore_patterns = opts.ignore_patterns or {},
+    never_ignore_patterns = opts.never_ignore or {},
   }, FSMonitor)
 
   -- gitignore patterns will be loaded when monitoring starts
@@ -141,6 +143,14 @@ end
 ---@param filepath string
 ---@return boolean should_ignore
 function FSMonitor:_should_ignore_file(filepath)
+  -- First check if file matches never_ignore patterns
+  for _, pattern in ipairs(self.never_ignore_patterns) do
+    if filepath:match(pattern) or filepath == pattern then
+      return false -- Never ignore this file
+    end
+  end
+
+  -- Then check gitignore and custom ignore patterns
   return gitignore.should_ignore(filepath, self.ignore_patterns, self.custom_ignore_patterns)
 end
 
@@ -1025,9 +1035,10 @@ end
 ---Revert files to state at a checkpoint
 ---R on checkpoint N: Revert to state AT that checkpoint (keep changes up to and including it)
 ---R on final checkpoint: Do nothing (already at final state)
----@param checkpoint_idx number Index of the checkpoint to revert TO
----@param checkpoints table List of all checkpoints
----@return table|nil result { new_changes, new_checkpoints, reverted_count, error_count } or nil if no-op
+---@param self FSMonitor.Monitor
+---@param checkpoint_idx number Index of checkpoint to revert to
+---@param checkpoints FSMonitor.Checkpoint[] Array of checkpoints
+---@return table|nil result {new_changes, new_checkpoints, reverted_count, error_count}
 function FSMonitor:revert_to_checkpoint(checkpoint_idx, checkpoints)
   if not checkpoints or #checkpoints == 0 then return nil end
 
@@ -1085,6 +1096,7 @@ function FSMonitor:revert_to_checkpoint(checkpoint_idx, checkpoints)
 end
 
 ---Revert ALL changes to original state (before any monitoring)
+---@param self FSMonitor.Monitor
 ---@param _checkpoints table List of all checkpoints (will be cleared)
 ---@return table|nil result { new_changes, new_checkpoints, reverted_count, error_count } or nil if no changes
 function FSMonitor:revert_to_original(_checkpoints)
