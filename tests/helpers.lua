@@ -51,17 +51,19 @@ Helpers.child_start = function(child)
   child.o.laststatus = 0
   child.o.cmdheight = 1
 
-  child.wait = function(ms, condition)
-    if condition == nil then
-      vim.loop.sleep(ms)
-      return true
-    end
+  if not child.wait then
+    child.wait = function(ms, condition)
+      if condition == nil then
+        vim.loop.sleep(ms)
+        return true
+      end
 
-    local check = function()
-      return child.lua_get(condition)
-    end
+      local check = function()
+        return child.lua_get(condition)
+      end
 
-    return vim.wait(ms, check)
+      return vim.wait(ms, check)
+    end
   end
 end
 
