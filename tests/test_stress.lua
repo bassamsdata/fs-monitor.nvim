@@ -134,13 +134,19 @@ T["StressTest"]["FullScenario"] = function()
     -- So hello should exist. mer should exist.
     local res2 = m:revert_to_checkpoint(2, _G.checkpoints)
     _G.res2 = res2
-    vim.wait(200)
 
-
+    -- CI can be slower; wait until expected filesystem state is observed (or timeout)
+    vim.wait(4000, function()
+      local has_mer = _G.ensure_exists("dir0/mer.lua")
+      local has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
+      local has_hello1 = _G.ensure_exists("dir2/dir3/hello1.lua")
+      return has_mer and has_hello and (not has_hello1)
+    end)
 
     _G.has_mer = _G.ensure_exists("dir0/mer.lua")
     _G.has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
     _G.has_hello1 = _G.ensure_exists("dir2/dir3/hello1.lua")
+
 
 
   ]])
@@ -160,11 +166,17 @@ T["StressTest"]["FullScenario"] = function()
     local res1 = m:revert_to_checkpoint(1, _G.checkpoints)
     _G.res1 = res1
 
-
+    vim.wait(4000, function()
+      local has_mer = _G.ensure_exists("dir0/mer.lua")
+      local has_hi = _G.ensure_exists("hi.lua")
+      local has_hi1 = _G.ensure_exists("hi1.lua")
+      return (not has_mer) and has_hi and (not has_hi1)
+    end)
 
     _G.has_mer_p1 = _G.ensure_exists("dir0/mer.lua")
     _G.has_hi = _G.ensure_exists("hi.lua")
     _G.has_hi1 = _G.ensure_exists("hi1.lua")
+
 
 
   ]])
@@ -184,7 +196,14 @@ T["StressTest"]["FullScenario"] = function()
 
     local res0 = m:revert_to_original(_G.checkpoints)
 
-
+    vim.wait(4000, function()
+      local has_hi = _G.ensure_exists("hi.lua")
+      local has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
+      local has_salute = _G.ensure_exists("dir1/salute.lua")
+      local has_dir1 = _G.ensure_exists("dir1")
+      local has_dir2 = _G.ensure_exists("dir2")
+      return (not has_hi) and (not has_hello) and (not has_salute) and (not has_dir1) and (not has_dir2)
+    end)
 
     _G.has_hi_orig = _G.ensure_exists("hi.lua")
     _G.has_hello_orig = _G.ensure_exists("dir2/dir3/hello.lua")
@@ -192,6 +211,7 @@ T["StressTest"]["FullScenario"] = function()
 
     _G.has_dir1 = _G.ensure_exists("dir1")
     _G.has_dir2 = _G.ensure_exists("dir2")
+
 
 
   ]])
