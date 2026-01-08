@@ -14,7 +14,7 @@ local T = new_set({
 
         _G.run_phase = function(phase_fn)
             phase_fn()
-            vim.wait(1000)
+            vim.wait(2000)
         end
 
         _G.count_changes = function(m)
@@ -134,6 +134,7 @@ T["StressTest"]["FullScenario"] = function()
     -- So hello should exist. mer should exist.
     local res2 = m:revert_to_checkpoint(2, _G.checkpoints)
     _G.res2 = res2
+    vim.wait(200)
 
 
 
