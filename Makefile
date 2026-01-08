@@ -13,4 +13,9 @@ deps/mini.nvim:
 format:
 	@stylua .
 
+testFile:
+	@if [ -z "$(FILE)" ]; then echo "Usage: make testFile FILE=path/to/test.lua"; exit 1; fi
+	@echo "Running test $(FILE)..."
+	nvim --headless --noplugin -u scripts/minimal_init.lua -c "lua MiniTest.run({\"$(FILE)\"})"
+
 .PHONY: all test deps format

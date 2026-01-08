@@ -71,7 +71,6 @@ local T = new_set({
 
 T["Actions"] = new_set()
 
-
 T["Actions"]["update_preview()"] = function()
   child.lua([[
     _G.state = _G.create_mock_state()

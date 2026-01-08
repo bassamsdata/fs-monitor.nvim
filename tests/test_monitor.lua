@@ -13,12 +13,10 @@ local T = new_set({
         vim.fn.mkdir(_G.TEST_DIR, "p")
         vim.uv.chdir(_G.TEST_DIR)
 
-        -- Helper to create a monitor instance
         _G.create_monitor = function(opts)
           return Monitor.new(opts)
         end
 
-        -- Mock fs module functions for revert tests
         _G.file_operations = { writes = {}, deletes = {}, renames = {} }
 
         local fs = require("fs-monitor.utils.fs")

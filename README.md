@@ -37,7 +37,7 @@ require("codecompanion").setup({
     fs_monitor = {
       enabled = true,
       opts = {
-        keymap = "gD",
+        keymap = "gF",
       },
     },
   },
@@ -48,7 +48,7 @@ Once enabled, fs-monitor will automatically:
 - Start monitoring when you submit a chat message
 - Track all file changes made by LLM tools
 - Create checkpoints after each response
-- Allow you to view diffs with `gD` and revert changes
+- Allow you to review changes with `gF` and revert changes
 
 ## Command
 

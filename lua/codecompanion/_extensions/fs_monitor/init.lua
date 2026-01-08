@@ -3,6 +3,7 @@
 -- Provides automatic file system monitoring and diff viewing for LLM tool executions
 
 local log = require("fs-monitor.log")
+local fmt = string.format
 
 local M = {}
 
@@ -99,7 +100,7 @@ local function setup_autocommands()
 
         if not session_id then
           local session = fs_monitor.create_session({
-            id = string.format("codecompanion_chat_%d", chat_id),
+            id = fmt("codecompanion_chat_%d", chat_id),
             metadata = { chat_id = chat_id, bufnr = bufnr, source = "codecompanion" },
           })
 
@@ -151,7 +152,7 @@ local function setup_autocommands()
             local current_session = fs_monitor.get_session(session_id)
             local cycle = #(current_session and current_session.checkpoints or {}) + 1
 
-            local checkpoint = fs_monitor.create_checkpoint(session_id, string.format("Response #%d", cycle))
+            local checkpoint = fs_monitor.create_checkpoint(session_id, fmt("Response #%d", cycle))
             if checkpoint then
               checkpoint.cycle = cycle
               log:debug("Created checkpoint #%d with %d changes", cycle, #changes)
@@ -335,7 +336,7 @@ return {
 
       local fs_monitor = require("fs-monitor")
       local session = fs_monitor.create_session({
-        id = string.format("codecompanion_chat_%d", chat_id),
+        id = fmt("codecompanion_chat_%d", chat_id),
         metadata = { chat_id = chat_id, bufnr = bufnr, source = "codecompanion" },
       })
 
