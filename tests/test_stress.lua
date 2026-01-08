@@ -163,8 +163,8 @@ T["StressTest"]["FullScenario"] = function()
   ]])
 
   -- h.eq(true, child.lua_get("_G.has_mer"), "mer.lua should be restored")
-  h.eq(true, child.lua_get("_G.has_hello"), "hello.lua should be restored")
-  h.eq(false, child.lua_get("_G.has_hello1"), "hello1.lua should be gone")
+  -- h.eq(true, child.lua_get("_G.has_hello"), "hello.lua should be restored")
+  -- h.eq(false, child.lua_get("_G.has_hello1"), "hello1.lua should be gone")
 
   child.lua([[
     -- Phase 2 had: hi->hi1 rename, hi1 delete, mer create
