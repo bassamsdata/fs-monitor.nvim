@@ -378,9 +378,16 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
   local relative_path = self:_get_relative_path(path, watch.root_path)
   local cached_content = lru.get(watch.cache, relative_path)
 
+  -- Track in-progress read
+  if watch.in_progress_reads then watch.in_progress_reads[path] = true end
+
   self:_read_file_async(path, function(new_content, err, stat)
     vim.schedule(function()
-      if not self.watches[watch_id] or not self.watches[watch_id].enabled then return end
+      -- Mark read as complete
+      local current_watch = self.watches[watch_id]
+      if current_watch and current_watch.in_progress_reads then current_watch.in_progress_reads[path] = nil end
+
+      -- Don't check enabled here - let stop_monitoring_async handle pending reads
 
       if err and (err:match("ENOENT") or err:match("no such file")) then
         if cached_content then
@@ -642,6 +649,7 @@ function FSMonitor:start_monitoring(tool_name, target_path, opts)
     cache = lru.create(self.max_cache_bytes),
     debounce_timer = nil,
     pending_events = {},
+    in_progress_reads = {},
     tool_name = tool_name,
     enabled = true,
     start_change_idx = #self.changes,
@@ -705,7 +713,20 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
   watch.enabled = false
   log:debug("Stopping monitoring: %s", watch_id)
 
-  local pending_paths = vim.tbl_keys(watch.pending_events or {})
+  -- Collect both pending events and in-progress reads
+  local pending_events = vim.tbl_keys(watch.pending_events or {})
+  local in_progress = vim.tbl_keys(watch.in_progress_reads or {})
+
+  -- Merge and deduplicate
+  local all_pending = {}
+  for _, path in ipairs(pending_events) do
+    all_pending[path] = true
+  end
+  for _, path in ipairs(in_progress) do
+    all_pending[path] = true
+  end
+  local pending_paths = vim.tbl_keys(all_pending)
+
   local watch_cache = watch.cache
   local watch_root = watch.root_path
   local watch_tool = watch.tool_name
@@ -720,14 +741,7 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
     return session_changes
   end
 
-  if #pending_paths == 0 then
-    local session_changes = get_session_changes()
-    cleanup_watch(watch)
-    self.watches[watch_id] = nil
-    return callback(session_changes)
-  end
-
-  -- Stop timers and handles but keep cache for pending reads
+  -- Stop timers and handles first
   if watch.debounce_timer then
     watch.debounce_timer:stop()
     if not watch.debounce_timer:is_closing() then watch.debounce_timer:close() end
@@ -740,74 +754,92 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
     watch.handle = nil
   end
 
-  local remaining = #pending_paths
-  local completed = false
-
-  local function on_file_processed()
-    remaining = remaining - 1
-
-    if remaining == 0 and not completed then
-      completed = true
-      local session_changes = get_session_changes()
-      -- Final cleanup - clear remaining cache
-      watch.cache = nil
-      watch.pending_events = nil
-      self.watches[watch_id] = nil
-      callback(session_changes)
+  -- Wait a bit for any in-progress reads to complete before checking pending
+  vim.defer_fn(function()
+    -- Re-check in-progress reads after brief delay
+    local still_in_progress = vim.tbl_keys(watch.in_progress_reads or {})
+    for _, path in ipairs(still_in_progress) do
+      all_pending[path] = true
     end
-  end
+    pending_paths = vim.tbl_keys(all_pending)
 
-  for _, path in ipairs(pending_paths) do
-    local relative_path = self:_get_relative_path(path, watch_root)
-    local cached_content = watch_cache and lru.get(watch_cache, relative_path)
+    if #pending_paths == 0 then
+      local session_changes = get_session_changes()
+      cleanup_watch(watch)
+      self.watches[watch_id] = nil
+      return callback(session_changes)
+    end
 
-    self:_read_file_async(path, function(content, err)
-      vim.schedule(function()
-        if err and (err:match("ENOENT") or err:match("no such file")) then
-          if cached_content then
-            self:_register_change({
-              path = relative_path,
-              kind = "deleted",
-              old_content = cached_content,
-              new_content = nil,
-              timestamp = uv.hrtime(),
-              tool_name = watch_tool,
-              metadata = {},
-            })
+    local remaining = #pending_paths
+    local completed = false
+
+    local function on_file_processed()
+      remaining = remaining - 1
+
+      if remaining == 0 and not completed then
+        completed = true
+        local session_changes = get_session_changes()
+        -- Final cleanup - clear remaining cache
+        watch.cache = nil
+        watch.pending_events = nil
+        watch.in_progress_reads = nil
+        self.watches[watch_id] = nil
+        callback(session_changes)
+      end
+    end
+
+    for _, path in ipairs(pending_paths) do
+      local relative_path = self:_get_relative_path(path, watch_root)
+      local cached_content = watch_cache and lru.get(watch_cache, relative_path)
+
+      self:_read_file_async(path, function(content, err)
+        vim.schedule(function()
+          if err and (err:match("ENOENT") or err:match("no such file")) then
+            if cached_content then
+              self:_register_change({
+                path = relative_path,
+                kind = "deleted",
+                old_content = cached_content,
+                new_content = nil,
+                timestamp = uv.hrtime(),
+                tool_name = watch_tool,
+                metadata = {},
+              })
+            end
+          elseif not err and content then
+            if cached_content and cached_content ~= content then
+              self:_register_change({
+                path = relative_path,
+                kind = "modified",
+                old_content = cached_content,
+                new_content = content,
+                timestamp = uv.hrtime(),
+                tool_name = watch_tool,
+                metadata = {
+                  old_size = #cached_content,
+                  new_size = #content,
+                },
+              })
+            elseif not cached_content then
+              self:_register_change({
+                path = relative_path,
+                kind = "created",
+                old_content = nil,
+                new_content = content,
+                timestamp = uv.hrtime(),
+                tool_name = watch_tool,
+                metadata = {
+                  size = #content,
+                },
+              })
+            end
           end
-        elseif not err and content then
-          if cached_content and cached_content ~= content then
-            self:_register_change({
-              path = relative_path,
-              kind = "modified",
-              old_content = cached_content,
-              new_content = content,
-              timestamp = uv.hrtime(),
-              tool_name = watch_tool,
-              metadata = {
-                old_size = #cached_content,
-                new_size = #content,
-              },
-            })
-          elseif not cached_content then
-            self:_register_change({
-              path = relative_path,
-              kind = "created",
-              old_content = nil,
-              new_content = content,
-              timestamp = uv.hrtime(),
-              tool_name = watch_tool,
-              metadata = {
-                size = #content,
-              },
-            })
-          end
-        end
 
-        on_file_processed()
+          on_file_processed()
+        end)
       end)
-    end)
-  end
+    end
+  end, 100)
 end
 
 ---Stop all active watches

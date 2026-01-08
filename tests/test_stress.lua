@@ -67,18 +67,13 @@ T["StressTest"]["FullScenario"] = function()
 
     os.remove("dir1/salute.lua")
 
-    -- Wait for debounce + async operations
-    vim.wait(1500)
+    vim.wait(800)
 
     _G.cp1 = m:create_checkpoint()
 
-    vim.wait(500)
-
     _G.w1_stopped = false
     m:stop_monitoring_async(w1, function() _G.w1_stopped = true end)
-    vim.wait(2000, function() return _G.w1_stopped end)
-
-    vim.wait(500)
+    vim.wait(1500, function() return _G.w1_stopped end)
 
     -- Phase 2
 
@@ -100,18 +95,13 @@ T["StressTest"]["FullScenario"] = function()
     vim.uv.fs_mkdir("dir0", 511)
     local f = io.open("dir0/mer.lua", "w"); f:write("mer"); f:close()
 
-    -- Wait for debounce + async operations
-    vim.wait(1500)
+    vim.wait(800)
 
     _G.cp2 = m:create_checkpoint()
 
-    vim.wait(500)
-
     _G.w2_stopped = false
     m:stop_monitoring_async(w2, function() _G.w2_stopped = true end)
-    vim.wait(2000, function() return _G.w2_stopped end)
-
-    vim.wait(500)
+    vim.wait(1500, function() return _G.w2_stopped end)
 
     -- Phase 3
     _G.p3_ready = false
@@ -124,61 +114,29 @@ T["StressTest"]["FullScenario"] = function()
 
     os.remove("dir0/mer.lua")
 
-    vim.wait(1500)
+    vim.wait(800)
     vim.uv.fs_rmdir("dir0")
 
     os.rename("dir2/dir3/hello.lua", "dir2/dir3/hello1.lua")
 
-    vim.wait(500)
+    vim.wait(300)
 
     os.remove("dir2/dir3/hello1.lua")
 
-    -- Wait for debounce (100ms) + async file reads to complete
-    vim.wait(2000)
+    vim.wait(800)
 
     _G.cp3 = m:create_checkpoint()
 
-    -- Additional wait to ensure all async operations are truly done
-    vim.wait(500)
-
     _G.w3_stopped = false
     m:stop_monitoring_async(w3, function() _G.w3_stopped = true end)
-    vim.wait(2000, function() return _G.w3_stopped end)
-
-    -- Extra settling time after watcher stops
-    vim.wait(500)
+    vim.wait(1500, function() return _G.w3_stopped end)
 
     _G.checkpoints = { _G.cp1, _G.cp2, _G.cp3 }
 
-    -- Wait for any pending filesystem events to be processed
-    vim.wait(500)
-
-    -- Debug: Check what changes were recorded in phase 3
-    _G.all_changes = m:get_all_changes()
-    _G.phase3_changes = {}
-    for _, change in ipairs(_G.all_changes) do
-      if change.timestamp > _G.cp2.timestamp then
-        table.insert(_G.phase3_changes, {
-          path = change.path,
-          kind = change.kind,
-          has_old = change.old_content ~= nil,
-          has_new = change.new_content ~= nil,
-          old_path = change.metadata and change.metadata.old_path or nil,
-        })
-      end
-    end
-
-    _G.total_changes = #_G.all_changes
-    _G.cp2_change_count = _G.cp2.change_count
-
-    -- Phase 3 had: mer deleted, hello->hello1 rename, hello1 deleted
-    -- Expect: mer restored, hello1 restored then renamed back to hello
-    -- So hello should exist. mer should exist.
     local res2 = m:revert_to_checkpoint(2, _G.checkpoints)
     _G.res2 = res2
 
-    -- Wait until expected filesystem state is observed (or timeout)
-    vim.wait(3000, function()
+    vim.wait(2000, function()
       local has_mer = _G.ensure_exists("dir0/mer.lua")
       local has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
       local has_hello1 = _G.ensure_exists("dir2/dir3/hello1.lua")
@@ -190,30 +148,6 @@ T["StressTest"]["FullScenario"] = function()
     _G.has_hello1 = _G.ensure_exists("dir2/dir3/hello1.lua")
 
   ]])
-
-  -- Debug output
-  local phase3_changes = child.lua_get("_G.phase3_changes")
-  local res2 = child.lua_get("_G.res2")
-  local total_changes = child.lua_get("_G.total_changes")
-  local cp2_change_count = child.lua_get("_G.cp2_change_count")
-
-  print("\n=== DEBUG INFO ===")
-  print("Total changes recorded: " .. tostring(total_changes))
-  print("CP2 change count: " .. tostring(cp2_change_count))
-  print("\n=== Phase 3 Changes (after CP2) ===")
-  print(vim.inspect(phase3_changes))
-  print("\n=== Revert Result ===")
-  print("Reverted count: " .. tostring(res2 and res2.reverted_count or "nil"))
-  print("Error count: " .. tostring(res2 and res2.error_count or "nil"))
-  print("\n=== File State After Revert ===")
-  print("has_mer: " .. tostring(child.lua_get("_G.has_mer")))
-  print("has_hello: " .. tostring(child.lua_get("_G.has_hello")))
-  print("has_hello1: " .. tostring(child.lua_get("_G.has_hello1")))
-
-  -- Check if dir0 exists
-  child.lua([[_G.has_dir0 = _G.ensure_exists("dir0")]])
-  print("has_dir0: " .. tostring(child.lua_get("_G.has_dir0")))
-  print("==================\n")
 
   h.eq(true, child.lua_get("_G.has_mer"), "mer.lua should be restored")
   h.eq(true, child.lua_get("_G.has_hello"), "hello.lua should be restored")
@@ -227,12 +161,10 @@ T["StressTest"]["FullScenario"] = function()
     -- hi1 deleted -> restore hi1
     -- hi->hi1 renamed -> rename hi1 to hi
 
-    vim.wait(500)
-
     local res1 = m:revert_to_checkpoint(1, _G.checkpoints)
     _G.res1 = res1
 
-    vim.wait(3000, function()
+    vim.wait(2000, function()
       local has_mer = _G.ensure_exists("dir0/mer.lua")
       local has_hi = _G.ensure_exists("hi.lua")
       local has_hi1 = _G.ensure_exists("hi1.lua")
@@ -260,11 +192,9 @@ T["StressTest"]["FullScenario"] = function()
     -- hello created -> delete hello
     -- hi created -> delete hi
 
-    vim.wait(500)
-
     local res0 = m:revert_to_original(_G.checkpoints)
 
-    vim.wait(3000, function()
+    vim.wait(2000, function()
       local has_hi = _G.ensure_exists("hi.lua")
       local has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
       local has_salute = _G.ensure_exists("dir1/salute.lua")
@@ -279,46 +209,7 @@ T["StressTest"]["FullScenario"] = function()
 
     _G.has_dir1 = _G.ensure_exists("dir1")
     _G.has_dir2 = _G.ensure_exists("dir2")
-
-    -- Debug: Check what's in dir1 if it exists
-    _G.dir1_contents = {}
-    if _G.has_dir1 then
-      local handle = vim.uv.fs_scandir("dir1")
-      if handle then
-        while true do
-          local name, type = vim.uv.fs_scandir_next(handle)
-          if not name then break end
-          table.insert(_G.dir1_contents, { name = name, type = type })
-        end
-      end
-    end
-
-    -- Check what's in dir2 if it exists
-    _G.dir2_contents = {}
-    if _G.has_dir2 then
-      local handle = vim.uv.fs_scandir("dir2")
-      if handle then
-        while true do
-          local name, type = vim.uv.fs_scandir_next(handle)
-          if not name then break end
-          table.insert(_G.dir2_contents, { name = name, type = type })
-        end
-      end
-    end
   ]])
-
-  print("\n=== After Revert to Original ===")
-  print("has_hi_orig: " .. tostring(child.lua_get("_G.has_hi_orig")))
-  print("has_hello_orig: " .. tostring(child.lua_get("_G.has_hello_orig")))
-  print("has_salute_orig: " .. tostring(child.lua_get("_G.has_salute_orig")))
-  print("has_dir1: " .. tostring(child.lua_get("_G.has_dir1")))
-  print("has_dir2: " .. tostring(child.lua_get("_G.has_dir2")))
-
-  local dir1_contents = child.lua_get("_G.dir1_contents")
-  local dir2_contents = child.lua_get("_G.dir2_contents")
-  print("\ndir1 contents: " .. vim.inspect(dir1_contents))
-  print("dir2 contents: " .. vim.inspect(dir2_contents))
-  print("==================\n")
 
   h.eq(false, child.lua_get("_G.has_hi_orig"), "hi.lua should be deleted")
   h.eq(false, child.lua_get("_G.has_hello_orig"), "hello.lua should be deleted")
