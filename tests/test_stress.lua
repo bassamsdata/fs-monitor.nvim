@@ -63,16 +63,17 @@ T["StressTest"]["FullScenario"] = function()
 
     local f = io.open("dir1/salute.lua", "w"); f:write("salute"); f:close()
 
-    vim.wait(500) 
+    vim.wait(500)
 
     os.remove("dir1/salute.lua")
 
-    vim.wait(1000) 
+    vim.wait(1000)
 
     _G.cp1 = m:create_checkpoint()
 
-    m:stop_monitoring_async(w1, function() end)
-    vim.wait(100)
+    _G.w1_stopped = false
+    m:stop_monitoring_async(w1, function() _G.w1_stopped = true end)
+    vim.wait(2000, function() return _G.w1_stopped end)
 
     -- Phase 2
 
@@ -98,8 +99,9 @@ T["StressTest"]["FullScenario"] = function()
 
     _G.cp2 = m:create_checkpoint()
 
-    m:stop_monitoring_async(w2, function() end)
-    vim.wait(100)
+    _G.w2_stopped = false
+    m:stop_monitoring_async(w2, function() _G.w2_stopped = true end)
+    vim.wait(2000, function() return _G.w2_stopped end)
 
     -- Phase 3
     _G.p3_ready = false
@@ -125,9 +127,14 @@ T["StressTest"]["FullScenario"] = function()
 
     _G.cp3 = m:create_checkpoint()
 
-    m:stop_monitoring_async(w3, function() end)
+    _G.w3_stopped = false
+    m:stop_monitoring_async(w3, function() _G.w3_stopped = true end)
+    vim.wait(2000, function() return _G.w3_stopped end)
 
     _G.checkpoints = { _G.cp1, _G.cp2, _G.cp3 }
+
+    -- Wait for any pending filesystem events to be processed
+    vim.wait(500)
 
     -- Phase 3 had: mer deleted, hello->hello1 rename, hello1 deleted
     -- Expect: mer restored, hello1 restored then renamed back to hello
@@ -135,12 +142,8 @@ T["StressTest"]["FullScenario"] = function()
     local res2 = m:revert_to_checkpoint(2, _G.checkpoints)
     _G.res2 = res2
 
-    -- Wait for the monitor to drain any pending events triggered by revert
-    -- (without this, revert can race with watcher callbacks on CI)
-    vim.wait(5000)
-
-    -- Then wait until expected filesystem state is observed (or timeout)
-    vim.wait(8000, function()
+    -- Wait until expected filesystem state is observed (or timeout)
+    vim.wait(3000, function()
       local has_mer = _G.ensure_exists("dir0/mer.lua")
       local has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
       local has_hello1 = _G.ensure_exists("dir2/dir3/hello1.lua")
@@ -168,10 +171,12 @@ T["StressTest"]["FullScenario"] = function()
     -- hi1 deleted -> restore hi1
     -- hi->hi1 renamed -> rename hi1 to hi
 
+    vim.wait(500)
+
     local res1 = m:revert_to_checkpoint(1, _G.checkpoints)
     _G.res1 = res1
 
-    vim.wait(4000, function()
+    vim.wait(3000, function()
       local has_mer = _G.ensure_exists("dir0/mer.lua")
       local has_hi = _G.ensure_exists("hi.lua")
       local has_hi1 = _G.ensure_exists("hi1.lua")
@@ -199,9 +204,11 @@ T["StressTest"]["FullScenario"] = function()
     -- hello created -> delete hello
     -- hi created -> delete hi
 
+    vim.wait(500)
+
     local res0 = m:revert_to_original(_G.checkpoints)
 
-    vim.wait(4000, function()
+    vim.wait(3000, function()
       local has_hi = _G.ensure_exists("hi.lua")
       local has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
       local has_salute = _G.ensure_exists("dir1/salute.lua")
