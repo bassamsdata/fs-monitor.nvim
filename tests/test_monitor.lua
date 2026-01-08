@@ -52,6 +52,23 @@ local T = new_set({
     end,
     post_case = function()
       child.lua([[
+        -- Restore mocked fs functions
+        pcall(_G.restore_fs_functions)
+
+        -- Stop any running monitors
+        if _G.m then
+          pcall(function()
+            if _G.m.stop_all_async then
+              _G.m:stop_all_async(function() end)
+            end
+          end)
+        end
+
+        -- Clear globals
+        _G.m = nil
+        _G.file_operations = nil
+
+        -- Clean up test directory
         pcall(vim.fn.delete, _G.TEST_DIR, "rf")
       ]])
     end,
