@@ -67,13 +67,18 @@ T["StressTest"]["FullScenario"] = function()
 
     os.remove("dir1/salute.lua")
 
-    vim.wait(1000)
+    -- Wait for debounce + async operations
+    vim.wait(1500)
 
     _G.cp1 = m:create_checkpoint()
+
+    vim.wait(500)
 
     _G.w1_stopped = false
     m:stop_monitoring_async(w1, function() _G.w1_stopped = true end)
     vim.wait(2000, function() return _G.w1_stopped end)
+
+    vim.wait(500)
 
     -- Phase 2
 
@@ -95,13 +100,18 @@ T["StressTest"]["FullScenario"] = function()
     vim.uv.fs_mkdir("dir0", 511)
     local f = io.open("dir0/mer.lua", "w"); f:write("mer"); f:close()
 
-    vim.wait(1000)
+    -- Wait for debounce + async operations
+    vim.wait(1500)
 
     _G.cp2 = m:create_checkpoint()
+
+    vim.wait(500)
 
     _G.w2_stopped = false
     m:stop_monitoring_async(w2, function() _G.w2_stopped = true end)
     vim.wait(2000, function() return _G.w2_stopped end)
+
+    vim.wait(500)
 
     -- Phase 3
     _G.p3_ready = false
@@ -114,7 +124,7 @@ T["StressTest"]["FullScenario"] = function()
 
     os.remove("dir0/mer.lua")
 
-    vim.wait(100)
+    vim.wait(1500)
     vim.uv.fs_rmdir("dir0")
 
     os.rename("dir2/dir3/hello.lua", "dir2/dir3/hello1.lua")
@@ -123,13 +133,20 @@ T["StressTest"]["FullScenario"] = function()
 
     os.remove("dir2/dir3/hello1.lua")
 
-    vim.wait(1000)
+    -- Wait for debounce (100ms) + async file reads to complete
+    vim.wait(2000)
 
     _G.cp3 = m:create_checkpoint()
+
+    -- Additional wait to ensure all async operations are truly done
+    vim.wait(500)
 
     _G.w3_stopped = false
     m:stop_monitoring_async(w3, function() _G.w3_stopped = true end)
     vim.wait(2000, function() return _G.w3_stopped end)
+
+    -- Extra settling time after watcher stops
+    vim.wait(500)
 
     _G.checkpoints = { _G.cp1, _G.cp2, _G.cp3 }
 
@@ -153,9 +170,6 @@ T["StressTest"]["FullScenario"] = function()
     _G.has_mer = _G.ensure_exists("dir0/mer.lua")
     _G.has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
     _G.has_hello1 = _G.ensure_exists("dir2/dir3/hello1.lua")
-
-
-
 
   ]])
 
