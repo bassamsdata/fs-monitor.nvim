@@ -153,6 +153,24 @@ T["StressTest"]["FullScenario"] = function()
     -- Wait for any pending filesystem events to be processed
     vim.wait(500)
 
+    -- Debug: Check what changes were recorded in phase 3
+    _G.all_changes = m:get_all_changes()
+    _G.phase3_changes = {}
+    for _, change in ipairs(_G.all_changes) do
+      if change.timestamp > _G.cp2.timestamp then
+        table.insert(_G.phase3_changes, {
+          path = change.path,
+          kind = change.kind,
+          has_old = change.old_content ~= nil,
+          has_new = change.new_content ~= nil,
+          old_path = change.metadata and change.metadata.old_path or nil,
+        })
+      end
+    end
+
+    _G.total_changes = #_G.all_changes
+    _G.cp2_change_count = _G.cp2.change_count
+
     -- Phase 3 had: mer deleted, hello->hello1 rename, hello1 deleted
     -- Expect: mer restored, hello1 restored then renamed back to hello
     -- So hello should exist. mer should exist.
@@ -172,6 +190,30 @@ T["StressTest"]["FullScenario"] = function()
     _G.has_hello1 = _G.ensure_exists("dir2/dir3/hello1.lua")
 
   ]])
+
+  -- Debug output
+  local phase3_changes = child.lua_get("_G.phase3_changes")
+  local res2 = child.lua_get("_G.res2")
+  local total_changes = child.lua_get("_G.total_changes")
+  local cp2_change_count = child.lua_get("_G.cp2_change_count")
+
+  print("\n=== DEBUG INFO ===")
+  print("Total changes recorded: " .. tostring(total_changes))
+  print("CP2 change count: " .. tostring(cp2_change_count))
+  print("\n=== Phase 3 Changes (after CP2) ===")
+  print(vim.inspect(phase3_changes))
+  print("\n=== Revert Result ===")
+  print("Reverted count: " .. tostring(res2 and res2.reverted_count or "nil"))
+  print("Error count: " .. tostring(res2 and res2.error_count or "nil"))
+  print("\n=== File State After Revert ===")
+  print("has_mer: " .. tostring(child.lua_get("_G.has_mer")))
+  print("has_hello: " .. tostring(child.lua_get("_G.has_hello")))
+  print("has_hello1: " .. tostring(child.lua_get("_G.has_hello1")))
+
+  -- Check if dir0 exists
+  child.lua([[_G.has_dir0 = _G.ensure_exists("dir0")]])
+  print("has_dir0: " .. tostring(child.lua_get("_G.has_dir0")))
+  print("==================\n")
 
   h.eq(true, child.lua_get("_G.has_mer"), "mer.lua should be restored")
   h.eq(true, child.lua_get("_G.has_hello"), "hello.lua should be restored")
@@ -238,9 +280,45 @@ T["StressTest"]["FullScenario"] = function()
     _G.has_dir1 = _G.ensure_exists("dir1")
     _G.has_dir2 = _G.ensure_exists("dir2")
 
+    -- Debug: Check what's in dir1 if it exists
+    _G.dir1_contents = {}
+    if _G.has_dir1 then
+      local handle = vim.uv.fs_scandir("dir1")
+      if handle then
+        while true do
+          local name, type = vim.uv.fs_scandir_next(handle)
+          if not name then break end
+          table.insert(_G.dir1_contents, { name = name, type = type })
+        end
+      end
+    end
 
-
+    -- Check what's in dir2 if it exists
+    _G.dir2_contents = {}
+    if _G.has_dir2 then
+      local handle = vim.uv.fs_scandir("dir2")
+      if handle then
+        while true do
+          local name, type = vim.uv.fs_scandir_next(handle)
+          if not name then break end
+          table.insert(_G.dir2_contents, { name = name, type = type })
+        end
+      end
+    end
   ]])
+
+  print("\n=== After Revert to Original ===")
+  print("has_hi_orig: " .. tostring(child.lua_get("_G.has_hi_orig")))
+  print("has_hello_orig: " .. tostring(child.lua_get("_G.has_hello_orig")))
+  print("has_salute_orig: " .. tostring(child.lua_get("_G.has_salute_orig")))
+  print("has_dir1: " .. tostring(child.lua_get("_G.has_dir1")))
+  print("has_dir2: " .. tostring(child.lua_get("_G.has_dir2")))
+
+  local dir1_contents = child.lua_get("_G.dir1_contents")
+  local dir2_contents = child.lua_get("_G.dir2_contents")
+  print("\ndir1 contents: " .. vim.inspect(dir1_contents))
+  print("dir2 contents: " .. vim.inspect(dir2_contents))
+  print("==================\n")
 
   h.eq(false, child.lua_get("_G.has_hi_orig"), "hi.lua should be deleted")
   h.eq(false, child.lua_get("_G.has_hello_orig"), "hello.lua should be deleted")
