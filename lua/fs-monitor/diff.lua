@@ -18,28 +18,30 @@ end
 ---Calculate window geometry for normal (non-fullscreen) mode
 ---@return table geometry
 local function calculate_geometry()
+  local max = math.max
+  local floor = math.floor
   local cfg = get_config()
   local cols = vim.o.columns
-  local lines = math.max(4, vim.o.lines - vim.o.cmdheight - 2)
+  local lines = max(4, vim.o.lines - vim.o.cmdheight - 2)
 
-  local right_w = math.max(40, math.floor(cols * cfg.right_width_ratio))
-  local left_w = math.max(20, math.floor(cols * cfg.left_width_ratio))
+  local right_w = max(40, floor(cols * cfg.right_width_ratio))
+  local left_w = max(20, floor(cols * cfg.left_width_ratio))
 
   local total = left_w + cfg.gap + right_w
 
   if total > cols then
     local scale = cols / total
-    left_w = math.max(cfg.min_left_width, math.floor(left_w * scale))
-    right_w = math.max(cfg.min_right_width, math.floor(right_w * scale))
+    left_w = max(cfg.min_left_width, floor(left_w * scale))
+    right_w = max(cfg.min_right_width, floor(right_w * scale))
     total = left_w + cfg.gap + right_w
   end
 
-  local height = math.max(cfg.min_height, math.floor(lines * cfg.height_ratio))
-  local row = math.max(0, math.floor((vim.o.lines - height) / 2))
-  local col = math.max(0, math.floor((cols - total) / 2))
+  local height = max(cfg.min_height, floor(lines * cfg.height_ratio))
+  local row = max(0, floor((vim.o.lines - height) / 2))
+  local col = max(0, floor((cols - total) / 2))
 
-  local checkpoints_h = math.max(5, math.floor(height * cfg.checkpoints_height_ratio))
-  local files_h = math.max(3, height - checkpoints_h - cfg.left_gap)
+  local checkpoints_h = max(5, floor(height * cfg.checkpoints_height_ratio))
+  local files_h = max(3, height - checkpoints_h - cfg.left_gap)
 
   return {
     left_w = left_w,
@@ -59,6 +61,8 @@ end
 ---@return table geometry
 local function get_maximized_geometry()
   local cfg = get_config()
+  local max = math.max
+  local floor = math.floor
   local cols = vim.o.columns
   local bottom = vim.o.cmdheight
   local top = (vim.o.showtabline == 2 or (vim.o.showtabline == 1 and #api.nvim_list_tabpages() > 1)) and 1 or 0
@@ -66,11 +70,11 @@ local function get_maximized_geometry()
 
   local available_width = cols - cfg.gap - 4
 
-  local left_w = math.floor(available_width * cfg.left_width_ratio / (cfg.left_width_ratio + cfg.right_width_ratio))
+  local left_w = floor(available_width * cfg.left_width_ratio / (cfg.left_width_ratio + cfg.right_width_ratio))
   local right_w = available_width - left_w
 
-  local checkpoints_h = math.max(5, math.floor(height * cfg.checkpoints_height_ratio))
-  local files_h = math.max(3, height - checkpoints_h - cfg.left_gap)
+  local checkpoints_h = max(5, floor(height * cfg.checkpoints_height_ratio))
+  local files_h = max(3, height - checkpoints_h - cfg.left_gap)
 
   return {
     left_w = left_w,
@@ -129,16 +133,8 @@ end
 ---@param changes FSMonitor.Change[]
 ---@return table summary
 local function generate_summary(changes)
-  local summary = {
-    total = #changes,
-    created = 0,
-    modified = 0,
-    deleted = 0,
-    renamed = 0,
-    transient = 0,
-    files = {},
-    by_file = {},
-  }
+  local summary =
+    { total = #changes, created = 0, modified = 0, deleted = 0, renamed = 0, transient = 0, files = {}, by_file = {} }
 
   for _, change in ipairs(changes) do
     if change.kind == "created" then
