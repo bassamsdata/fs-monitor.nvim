@@ -135,8 +135,12 @@ T["StressTest"]["FullScenario"] = function()
     local res2 = m:revert_to_checkpoint(2, _G.checkpoints)
     _G.res2 = res2
 
-    -- CI can be slower; wait until expected filesystem state is observed (or timeout)
-    vim.wait(4000, function()
+    -- Wait for the monitor to drain any pending events triggered by revert
+    -- (without this, revert can race with watcher callbacks on CI)
+    vim.wait(5000)
+
+    -- Then wait until expected filesystem state is observed (or timeout)
+    vim.wait(8000, function()
       local has_mer = _G.ensure_exists("dir0/mer.lua")
       local has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
       local has_hello1 = _G.ensure_exists("dir2/dir3/hello1.lua")
@@ -146,6 +150,7 @@ T["StressTest"]["FullScenario"] = function()
     _G.has_mer = _G.ensure_exists("dir0/mer.lua")
     _G.has_hello = _G.ensure_exists("dir2/dir3/hello.lua")
     _G.has_hello1 = _G.ensure_exists("dir2/dir3/hello1.lua")
+
 
 
 
