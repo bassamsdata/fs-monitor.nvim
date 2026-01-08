@@ -68,7 +68,6 @@ function FSMonitor.new(opts)
     session_id = opts.session_id or "default",
     watches = {},
     changes = {},
-    content_cache = lru.create(max_cache_bytes),
     debounce_ms = opts.debounce_ms or DEFAULT_DEBOUNCE_MS,
     max_file_size = opts.max_file_size or DEFAULT_MAX_FILE_SIZE,
     max_prepopulate_files = opts.max_prepopulate_files or DEFAULT_MAX_PREPOPULATE_FILES,
@@ -365,7 +364,12 @@ end
 ---@param on_complete? fun() Optional callback when processing is done
 function FSMonitor:_process_file_change(watch_id, path, on_complete)
   local watch = self.watches[watch_id]
-  if not watch or not watch.enabled then
+  if not watch then
+    if on_complete then on_complete() end
+    return
+  end
+
+  if not watch.enabled then
     if on_complete then on_complete() end
     return
   end
@@ -378,16 +382,20 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
   local relative_path = self:_get_relative_path(path, watch.root_path)
   local cached_content = lru.get(watch.cache, relative_path)
 
-  -- Track in-progress read
-  if watch.in_progress_reads then watch.in_progress_reads[path] = true end
+  watch.in_progress_reads[path] = (watch.in_progress_reads[path] or 0) + 1
 
   self:_read_file_async(path, function(new_content, err, stat)
     vim.schedule(function()
-      -- Mark read as complete
       local current_watch = self.watches[watch_id]
-      if current_watch and current_watch.in_progress_reads then current_watch.in_progress_reads[path] = nil end
+      if current_watch and current_watch.in_progress_reads then
+        current_watch.in_progress_reads[path] = current_watch.in_progress_reads[path] - 1
+        if current_watch.in_progress_reads[path] <= 0 then current_watch.in_progress_reads[path] = nil end
+      end
 
-      -- Don't check enabled here - let stop_monitoring_async handle pending reads
+      if not current_watch or not current_watch.enabled then
+        if on_complete then on_complete() end
+        return
+      end
 
       if err and (err:match("ENOENT") or err:match("no such file")) then
         if cached_content then
@@ -522,7 +530,7 @@ function FSMonitor:_prepopulate_cache(watch, target_path, is_dir, on_complete)
     self:_read_file_async(target_path, function(content, err)
       vim.schedule(function()
         if not err and content then
-          watch.cache[relative_path] = content
+          lru.set(watch.cache, relative_path, content)
           stats.files_cached = 1
           stats.bytes_cached = #content
         else
@@ -710,29 +718,13 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
   local watch = self.watches[watch_id]
   if not watch then return callback({}) end
 
-  watch.enabled = false
   log:debug("Stopping monitoring: %s", watch_id)
-
-  -- Collect both pending events and in-progress reads
-  local pending_events = vim.tbl_keys(watch.pending_events or {})
-  local in_progress = vim.tbl_keys(watch.in_progress_reads or {})
-
-  -- Merge and deduplicate
-  local all_pending = {}
-  for _, path in ipairs(pending_events) do
-    all_pending[path] = true
-  end
-  for _, path in ipairs(in_progress) do
-    all_pending[path] = true
-  end
-  local pending_paths = vim.tbl_keys(all_pending)
 
   local watch_cache = watch.cache
   local watch_root = watch.root_path
   local watch_tool = watch.tool_name
   local start_idx = watch.start_change_idx
 
-  -- Helper to get changes from this monitoring session only
   local function get_session_changes()
     local session_changes = {}
     for i = start_idx + 1, #self.changes do
@@ -741,7 +733,6 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
     return session_changes
   end
 
-  -- Stop timers and handles first
   if watch.debounce_timer then
     watch.debounce_timer:stop()
     if not watch.debounce_timer:is_closing() then watch.debounce_timer:close() end
@@ -754,41 +745,47 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
     watch.handle = nil
   end
 
-  -- Wait a bit for any in-progress reads to complete before checking pending
-  vim.defer_fn(function()
-    -- Re-check in-progress reads after brief delay
-    local still_in_progress = vim.tbl_keys(watch.in_progress_reads or {})
-    for _, path in ipairs(still_in_progress) do
-      all_pending[path] = true
-    end
-    pending_paths = vim.tbl_keys(all_pending)
+  local pending_events = vim.tbl_keys(watch.pending_events or {})
+  watch.pending_events = {}
 
-    if #pending_paths == 0 then
+  local function check_completion()
+    local has_in_progress = false
+    for _, count in pairs(watch.in_progress_reads) do
+      if count > 0 then
+        has_in_progress = true
+        break
+      end
+    end
+
+    if has_in_progress then
+      vim.defer_fn(check_completion, 50)
+      return
+    end
+
+    if #pending_events == 0 then
+      watch.enabled = false
       local session_changes = get_session_changes()
       cleanup_watch(watch)
       self.watches[watch_id] = nil
       return callback(session_changes)
     end
 
-    local remaining = #pending_paths
+    local remaining = #pending_events
     local completed = false
 
     local function on_file_processed()
       remaining = remaining - 1
-
       if remaining == 0 and not completed then
         completed = true
+        watch.enabled = false
         local session_changes = get_session_changes()
-        -- Final cleanup - clear remaining cache
-        watch.cache = nil
-        watch.pending_events = nil
-        watch.in_progress_reads = nil
+        cleanup_watch(watch)
         self.watches[watch_id] = nil
         callback(session_changes)
       end
     end
 
-    for _, path in ipairs(pending_paths) do
+    for _, path in ipairs(pending_events) do
       local relative_path = self:_get_relative_path(path, watch_root)
       local cached_content = watch_cache and lru.get(watch_cache, relative_path)
 
@@ -839,26 +836,22 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
         end)
       end)
     end
-  end, 100)
+  end
+
+  check_completion()
 end
 
 ---Stop all active watches
 ---@param callback fun() Called when all watches are stopped
 function FSMonitor:stop_all_async(callback)
   local watch_ids = vim.tbl_keys(self.watches)
-  if #watch_ids == 0 then
-    self.content_cache = {}
-    return callback()
-  end
+  if #watch_ids == 0 then return callback() end
 
   local remaining = #watch_ids
   for _, watch_id in ipairs(watch_ids) do
     self:stop_monitoring_async(watch_id, function()
       remaining = remaining - 1
-      if remaining == 0 then
-        self.content_cache = {}
-        callback()
-      end
+      if remaining == 0 then callback() end
     end)
   end
 end
@@ -900,16 +893,6 @@ end
 ---@param new_changes FSMonitor.Change[]
 function FSMonitor:set_changes(new_changes)
   self.changes = vim.deepcopy(new_changes)
-
-  -- Rebuild content_cache to only include files that have changes
-  local files_with_changes = {}
-  for _, change in ipairs(new_changes) do
-    files_with_changes[change.path] = true
-  end
-
-  for path, _ in pairs(self.content_cache) do
-    if not files_with_changes[path] then self.content_cache[path] = nil end
-  end
 end
 
 ---Get changes for a specific tool
@@ -1126,7 +1109,6 @@ function FSMonitor:revert_to_checkpoint(checkpoint_idx, checkpoints)
   self:_refresh_modified_buffers(modified_files, cwd)
 
   self.changes = changes_to_keep
-  self:_cleanup_content_cache(changes_to_keep)
 
   local new_checkpoints = {}
   for i = 1, checkpoint_idx do
@@ -1155,7 +1137,6 @@ function FSMonitor:revert_to_original(_checkpoints)
   self:_refresh_modified_buffers(modified_files, cwd)
 
   self.changes = {}
-  self.content_cache = {}
 
   return {
     new_changes = {},
@@ -1182,18 +1163,6 @@ function FSMonitor:_refresh_modified_buffers(modified_files, cwd)
       end
     end
   end)
-end
-
----Clean up content cache for files no longer in changes
----@param changes_to_keep FSMonitor.Change[]
-function FSMonitor:_cleanup_content_cache(changes_to_keep)
-  local files_with_changes = {}
-  for _, change in ipairs(changes_to_keep) do
-    files_with_changes[change.path] = true
-  end
-  for path, _ in pairs(self.content_cache) do
-    if not files_with_changes[path] then self.content_cache[path] = nil end
-  end
 end
 
 return FSMonitor
