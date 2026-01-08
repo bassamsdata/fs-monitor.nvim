@@ -3,13 +3,13 @@
 
 local uv = vim.uv
 
-local fs = {}
+local Fs = {}
 
 ---Safely delete a directory if empty
 ---@param dirpath string
 ---@return boolean success
 ---@return string|nil error
-function fs.delete_dir_if_empty(dirpath)
+function Fs.delete_dir_if_empty(dirpath)
   local ok, err = pcall(function()
     local stat = uv.fs_stat(dirpath)
     if stat and stat.type == "directory" then
@@ -28,7 +28,7 @@ end
 ---@param new_path string
 ---@return boolean success
 ---@return string|nil error
-function fs.rename_file(old_path, new_path)
+function Fs.rename_file(old_path, new_path)
   local ok, err = pcall(function()
     local parent_dir = vim.fs.dirname(new_path)
     if parent_dir and parent_dir ~= "" then vim.fn.mkdir(parent_dir, "p") end
@@ -44,7 +44,7 @@ end
 ---@param filepath string
 ---@return boolean success
 ---@return string|nil error
-function fs.delete_file(filepath)
+function Fs.delete_file(filepath)
   local ok, err = pcall(function()
     local stat = uv.fs_stat(filepath)
     if stat then os.remove(filepath) end
@@ -58,7 +58,7 @@ end
 ---@param content string
 ---@return boolean success
 ---@return string|nil error
-function fs.write_file(filepath, content)
+function Fs.write_file(filepath, content)
   local ok, err = pcall(function()
     local parent_dir = vim.fs.dirname(filepath)
     if parent_dir and parent_dir ~= "" then vim.fn.mkdir(parent_dir, "p") end
@@ -76,4 +76,4 @@ function fs.write_file(filepath, content)
   return true, nil
 end
 
-return fs
+return Fs
