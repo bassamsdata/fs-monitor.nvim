@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/bassamsdata/fs-monitor.nvim/compare/v1.2.0...v2.0.0) (2026-01-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **fs-monitor:** new rename and transient operations and revert, Adding tests, remaking config ([#4](https://github.com/bassamsdata/fs-monitor.nvim/issues/4))
+
+### Features
+
+* **fs-monitor:** new rename and transient operations and revert, Adding tests, remaking config ([#4](https://github.com/bassamsdata/fs-monitor.nvim/issues/4)) ([907d379](https://github.com/bassamsdata/fs-monitor.nvim/commit/907d379e913942482afb8df3ef6a21d668aee100))
+
 ## [1.2.0](https://github.com/bassamsdata/fs-monitor.nvim/compare/v1.1.0...v1.2.0) (2026-01-07)
 
 
