@@ -5,6 +5,7 @@ local M = {}
 
 local api = vim.api
 local set_option = vim.api.nvim_set_option_value
+local fmt = string.format
 
 -- ============================================================================
 -- HELPER FUNCTIONS
@@ -64,7 +65,7 @@ end
 ---Get diff configuration
 ---@return FSMonitor.DiffConfig
 local function get_config()
-  return require("fs-monitor.config").diff_options
+  return require("fs-monitor.config").ui_options
 end
 
 -- ============================================================================
@@ -156,7 +157,7 @@ function M.update_preview(state, idx)
     else
       new_lines = { "(empty file)" }
     end
-  elseif net_operation == "deleted" then
+  elseif net_operation == "deleted" or net_operation == "transient" then
     if first_change.old_content then
       old_lines = vim.split(first_change.old_content, "\n", { plain = true })
     else
@@ -187,13 +188,15 @@ function M.update_preview(state, idx)
   end
 
   if api.nvim_win_is_valid(state.right_win) then
-    local title_icon = cfg.icons.title_modified
+    local title_icon = cfg.icons.modified
     if net_operation == "created" then
-      title_icon = cfg.icons.title_created
+      title_icon = cfg.icons.created
     elseif net_operation == "deleted" then
-      title_icon = cfg.icons.title_deleted
+      title_icon = cfg.icons.deleted
     elseif net_operation == "renamed" then
-      title_icon = cfg.icons.title_renamed
+      title_icon = cfg.icons.renamed
+    elseif net_operation == "transient" then
+      title_icon = cfg.icons.transient
     end
     local title_name = vim.fn.fnamemodify(filepath, ":t")
     if net_operation == "renamed" and file_info.old_path then
@@ -202,10 +205,10 @@ function M.update_preview(state, idx)
     end
 
     local hunk_count_str = ""
-    if #hunks > 0 then hunk_count_str = string.format(" [%d %s]", #hunks, util.pluralize(#hunks, "hunk")) end
+    if #hunks > 0 then hunk_count_str = fmt(" [%d %s]", #hunks, util.pluralize(#hunks, "hunk")) end
 
     api.nvim_win_set_config(state.right_win, {
-      title = string.format(" %s %s%s ", title_icon, title_name, hunk_count_str),
+      title = fmt(" %s %s%s ", title_icon, title_name, hunk_count_str),
       title_pos = "center",
     })
   end
@@ -344,7 +347,7 @@ function M.jump_to_file_line(state)
   local absolute_path = vim.fs.joinpath(cwd, state.current_filepath)
   local stat = vim.uv.fs_stat(absolute_path)
   if not stat then
-    util.notify(string.format("File not found: %s", state.current_filepath), vim.log.levels.WARN)
+    util.notify(fmt("File not found: %s", state.current_filepath), vim.log.levels.WARN)
     return
   end
 
@@ -382,7 +385,7 @@ function M.revert_current_hunk(state)
   if not hunk then return end
 
   local confirm_result = ui.confirm(
-    string.format("Revert hunk at line %d?", hunk.original_start),
+    fmt("Revert hunk at line %d?", hunk.original_start),
     { "&Yes", "&No" },
     { default = 2, highlight_group = "WarningMsg" }
   )
@@ -413,7 +416,7 @@ function M.revert_current_hunk(state)
 
   local ok, err = pcall(vim.fn.writefile, new_lines, absolute_path)
   if not ok then
-    util.notify(string.format("Failed to revert hunk: %s", err), vim.log.levels.ERROR)
+    util.notify(fmt("Failed to revert hunk: %s", err), vim.log.levels.ERROR)
     return
   end
 
@@ -532,7 +535,7 @@ function M.revert_to_checkpoint(state, checkpoint_idx)
   end
 
   local checkpoint = state.checkpoints[checkpoint_idx]
-  local target_label = checkpoint.label or string.format("Checkpoint %d", checkpoint_idx)
+  local target_label = checkpoint.label or fmt("Checkpoint %d", checkpoint_idx)
 
   local files_to_revert = {}
   for _, change in ipairs(state.all_changes) do
@@ -546,7 +549,7 @@ function M.revert_to_checkpoint(state, checkpoint_idx)
   end
 
   local confirm_result = ui.confirm(
-    string.format("Revert %d file(s) to %s?", file_count, target_label),
+    fmt("Revert %d file(s) to %s?", file_count, target_label),
     { "&Yes", "&No" },
     { default = 2, highlight_group = "WarningMsg" }
   )
@@ -576,8 +579,8 @@ function M.revert_to_checkpoint(state, checkpoint_idx)
 
   refresh_ui(state, { show_empty_message = true })
 
-  local msg = string.format("Reverted %d file(s) to %s", result.reverted_count, target_label)
-  if result.error_count > 0 then msg = msg .. string.format(" (%d errors)", result.error_count) end
+  local msg = fmt("Reverted %d file(s) to %s", result.reverted_count, target_label)
+  if result.error_count > 0 then msg = msg .. fmt(" (%d errors)", result.error_count) end
   util.notify(msg, result.error_count > 0 and vim.log.levels.WARN or vim.log.levels.INFO)
 end
 
@@ -604,7 +607,7 @@ function M.revert_to_original(state)
   local file_count = vim.tbl_count(files_to_revert)
 
   local confirm_result = ui.confirm(
-    string.format("Revert ALL %d file(s) to original state? This cannot be undone.", file_count),
+    fmt("Revert ALL %d file(s) to original state? This cannot be undone.", file_count),
     { "&Yes", "&No" },
     { default = 2, highlight_group = "WarningMsg" }
   )
@@ -625,8 +628,8 @@ function M.revert_to_original(state)
 
   if state.on_revert then state.on_revert(result.new_changes, result.new_checkpoints) end
 
-  local msg = string.format("Reverted %d file(s) to original state", result.reverted_count)
-  if result.error_count > 0 then msg = msg .. string.format(" (%d errors)", result.error_count) end
+  local msg = fmt("Reverted %d file(s) to original state", result.reverted_count)
+  if result.error_count > 0 then msg = msg .. fmt(" (%d errors)", result.error_count) end
   util.notify(msg, result.error_count > 0 and vim.log.levels.WARN or vim.log.levels.INFO)
 end
 
@@ -642,29 +645,29 @@ local function generate_help_lines()
 
   return {
     "## General",
-    string.format("- **%s**: %s", km.toggle_help.key, km.toggle_help.desc),
-    string.format("- **%s** / **%s**: %s", km.close.key, km.close_alt.key, km.close.desc),
-    string.format("- **%s**: %s", km.cycle_focus.key, km.cycle_focus.desc),
-    string.format("- **%s**: %s", km.toggle_preview.key, km.toggle_preview.desc),
-    string.format("- **%s**: %s", km.toggle_fullscreen.key, km.toggle_fullscreen.desc),
-    string.format("- **%s**: %s", km.toggle_word_diff.key, km.toggle_word_diff.desc),
+    fmt("- **%s**: %s", km.toggle_help.key, km.toggle_help.desc),
+    fmt("- **%s** / **%s**: %s", km.close.key, km.close_alt.key, km.close.desc),
+    fmt("- **%s**: %s", km.cycle_focus.key, km.cycle_focus.desc),
+    fmt("- **%s**: %s", km.toggle_preview.key, km.toggle_preview.desc),
+    fmt("- **%s**: %s", km.toggle_fullscreen.key, km.toggle_fullscreen.desc),
+    fmt("- **%s**: %s", km.toggle_word_diff.key, km.toggle_word_diff.desc),
     "",
     "## Navigation",
-    string.format("- **%s** / **%s**: Next/Prev file", km.next_file_alt.key, km.prev_file_alt.key),
-    string.format("- **%s** / **%s**: Next/Prev hunk", km.next_hunk.key, km.prev_hunk.key),
-    string.format("- **%s** / **%s**: Next/Prev file (preview)", km.next_file.key, km.prev_file.key),
-    string.format("- **%s**: %s (files window)", km.goto_file.key, km.goto_file.desc),
-    string.format("- **%s** / **%s**: %s (preview)", km.goto_hunk.key, km.goto_hunk_alt.key, km.goto_hunk.desc),
+    fmt("- **%s** / **%s**: Next/Prev file", km.next_file_alt.key, km.prev_file_alt.key),
+    fmt("- **%s** / **%s**: Next/Prev hunk", km.next_hunk.key, km.prev_hunk.key),
+    fmt("- **%s** / **%s**: Next/Prev file (preview)", km.next_file.key, km.prev_file.key),
+    fmt("- **%s**: %s (files window)", km.goto_file.key, km.goto_file.desc),
+    fmt("- **%s** / **%s**: %s (preview)", km.goto_hunk.key, km.goto_hunk_alt.key, km.goto_hunk.desc),
     "",
     "## Actions",
-    string.format("- **%s**: %s", km.revert_hunk.key, km.revert_hunk.desc),
+    fmt("- **%s**: %s", km.revert_hunk.key, km.revert_hunk.desc),
     "",
     "## Checkpoints",
-    string.format("- **%s**: %s (safe - shows cycle changes)", km.view_checkpoint.key, km.view_checkpoint.desc),
-    string.format("- **%s**: %s (safe - shows accumulated to cycle)", km.view_cumulative.key, km.view_cumulative.desc),
-    string.format("- **%s**: Reset checkpoint filter (safe - resets UI only)", km.reset_filter.key),
-    string.format("- **%s**: %s", km.revert_checkpoint.key, km.revert_checkpoint.desc),
-    string.format("- **%s**: %s", km.revert_all.key, km.revert_all.desc),
+    fmt("- **%s**: %s (safe - shows cycle changes)", km.view_checkpoint.key, km.view_checkpoint.desc),
+    fmt("- **%s**: %s (safe - shows accumulated to cycle)", km.view_cumulative.key, km.view_cumulative.desc),
+    fmt("- **%s**: Reset checkpoint filter (safe - resets UI only)", km.reset_filter.key),
+    fmt("- **%s**: %s", km.revert_checkpoint.key, km.revert_checkpoint.desc),
+    fmt("- **%s**: %s", km.revert_all.key, km.revert_all.desc),
   }
 end
 
@@ -820,7 +823,7 @@ function M.toggle_word_diff(state)
   if state.selected_file_idx and #state.summary.files > 0 then M.update_preview(state, state.selected_file_idx) end
 
   local status = state.word_diff and "enabled" or "disabled"
-  util.notify(string.format("Word diff %s", status), vim.log.levels.INFO)
+  util.notify(fmt("Word diff %s", status), vim.log.levels.INFO)
 end
 
 -- ============================================================================

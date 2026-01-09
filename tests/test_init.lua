@@ -18,7 +18,11 @@ local T = new_set({
     end,
     post_case = function()
       child.lua([[
-        fs_monitor.clear_all()
+        _G.cleanup_done = false
+        fs_monitor.clear_all(function()
+          _G.cleanup_done = true
+        end)
+        vim.wait(2000, function() return _G.cleanup_done end)
         pcall(vim.fn.delete, _G.TEST_DIR, "rf")
       ]])
     end,

@@ -5,7 +5,7 @@
 -- CHANGE TYPES
 -- ============================================================================
 
----@alias FSMonitor.Change.Kind "created"|"modified"|"deleted"|"renamed"
+---@alias FSMonitor.Change.Kind "created"|"modified"|"deleted"|"renamed"|"transient"
 
 ---@class FSMonitor.Change.Metadata
 ---@field attribution? "confirmed"|"ambiguous"|"unknown" Path validation status
@@ -59,6 +59,7 @@
 ---@field cache table File path -> content cache (LRU)
 ---@field debounce_timer? uv.uv_timer_t Timer for debouncing events
 ---@field pending_events table<string, boolean> Files with pending events to process
+---@field in_progress_reads table<string, number> Tracks count of in-progress async reads per path
 ---@field tool_name string Name of tool being monitored
 ---@field enabled boolean Whether this watch is active
 ---@field start_change_idx number Index in self.changes where this watch started
@@ -105,13 +106,10 @@
 ---@field deleted string Icon for deleted files
 ---@field modified string Icon for modified files
 ---@field renamed string Icon for renamed files
+---@field transient string Icon for transient files
 ---@field checkpoint string Icon for checkpoints
 ---@field file_selector string Icon for file selection indicator
 ---@field sign string Sign column character
----@field title_created string Title icon for created files
----@field title_deleted string Title icon for deleted files
----@field title_modified string Title icon for modified files
----@field title_renamed string Title icon for renamed files
 
 ---@class FSMonitor.DiffTitles
 ---@field files string Title for files panel
@@ -267,7 +265,6 @@
 ---@field watch_counter number Counter for generating unique watch IDs
 ---@field ignore_patterns string[] Compiled ignore patterns from .gitignore
 ---@field gitignore_loaded boolean Whether .gitignore has been loaded
----@field content_cache table<string, string> Global content cache
 ---@field respect_gitignore boolean Whether to respect .gitignore
 ---@field custom_ignore_patterns string[] User-defined ignore patterns
 ---@field never_ignore_patterns string[] Patterns to never ignore even if in .gitignore
