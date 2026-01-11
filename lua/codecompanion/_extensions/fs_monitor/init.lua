@@ -146,7 +146,7 @@ local function setup_autocommands()
       local session = fs_monitor.get_session(session_id)
       if not session then return end
 
-      fs_monitor.stop(session_id, function(changes)
+      fs_monitor.pause(session_id, function(changes)
         vim.schedule(function()
           if M._opts.auto_checkpoint and changes and #changes > 0 then
             local current_session = fs_monitor.get_session(session_id)
@@ -229,7 +229,7 @@ local function setup_autocommands()
       local session_id = M._chat_sessions[chat_id]
       if session_id then
         log:debug("Destroying session %s for closed chat %d", session_id, chat_id)
-        require("fs-monitor").destroy_session(session_id)
+        require("fs-monitor").destroy(session_id)
         M._chat_sessions[chat_id] = nil
       end
 
@@ -347,16 +347,27 @@ return {
       return session.id
     end,
 
-    ---Manually stop monitoring for a chat
+    ---Manually pause monitoring for a chat
     ---@param chat_id number
     ---@param callback? fun(changes: table)
-    stop_monitoring = function(chat_id, callback)
+    pause_monitoring = function(chat_id, callback)
       local session_id = M._chat_sessions[chat_id]
       if session_id then
-        require("fs-monitor").stop(session_id, callback or function() end)
+        require("fs-monitor").pause(session_id, callback or function() end)
       elseif callback then
         callback({})
       end
+    end,
+
+    ---Manually resume monitoring for a chat
+    ---@param chat_id number
+    ---@param target_path? string
+    ---@param opts? table
+    ---@return string|nil session_id
+    resume_monitoring = function(chat_id, target_path, opts)
+      local session_id = M._chat_sessions[chat_id]
+      if session_id then return require("fs-monitor").resume(session_id, target_path, opts) end
+      return nil
     end,
 
     ---Check if a chat has an active session

@@ -44,7 +44,7 @@ T["Monitor"]["can start and stop a session"] = function()
 
   child.lua([[
     _G.stopped = false
-    fs_monitor.stop("test_session", function(changes)
+    fs_monitor.pause("test_session", function(changes)
       _G.changes = changes
       _G.stopped = true
     end)
@@ -73,7 +73,7 @@ T["Monitor"]["detects file creation"] = function()
 
   child.lua([[
     _G.stopped = false
-    fs_monitor.stop("test_creation", function(changes)
+    fs_monitor.pause("test_creation", function(changes)
       _G.changes = changes
       _G.stopped = true
     end)
@@ -112,7 +112,7 @@ T["Monitor"]["detects file modification"] = function()
 
   child.lua([[
     _G.stopped = false
-    fs_monitor.stop("test_mod", function(changes)
+    fs_monitor.pause("test_mod", function(changes)
       _G.changes = changes
       _G.stopped = true
     end)
@@ -150,7 +150,7 @@ T["Monitor"]["detects file deletion"] = function()
 
   child.lua([[
     _G.stopped = false
-    fs_monitor.stop("test_del", function(changes)
+    fs_monitor.pause("test_del", function(changes)
       _G.changes = changes
       _G.stopped = true
     end)
@@ -240,13 +240,13 @@ T["Session"]["supports multiple concurrent sessions"] = function()
   h.eq(true, child.lua_get("_G.has_s3"))
 end
 
-T["Session"]["destroy_session removes session"] = function()
+T["Session"]["destroy removes session"] = function()
   child.lua([[
     fs_monitor.create_session({ id = "to_destroy" })
     _G.exists_before = fs_monitor.get_session("to_destroy") ~= nil
 
     _G.destroyed = false
-    fs_monitor.destroy_session("to_destroy", function()
+    fs_monitor.destroy("to_destroy", function()
       _G.destroyed = true
     end)
   ]])
