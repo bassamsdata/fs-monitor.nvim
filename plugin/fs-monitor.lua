@@ -56,9 +56,13 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
       util.notify("Session ID required for stop", vim.log.levels.WARN)
     else
       fs_monitor.stop(session_id, {
-        callback = function()
+        callback = function(destroyed)
           vim.schedule(function()
-            util.notify(string.format("Session stopped and destroyed: %s", session_id))
+            if destroyed then
+              util.notify(string.format("Session stopped and destroyed: %s", session_id))
+            else
+              util.notify(string.format("Stop cancelled for session: %s", session_id))
+            end
           end)
         end,
       })
@@ -78,7 +82,7 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
         end)
       end)
     end
-  elseif subcmd == "diff" or subcmd == "show" then
+  elseif subcmd == "show" then
     local session_id = args[2]
     if not session_id or session_id == "" then
       local sessions = fs_monitor.get_all_sessions()
@@ -157,8 +161,7 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
       "  resume <session_id>  - Resume monitoring existing session",
       "  stop <session_id>    - Stop and destroy session (with confirmation)",
       "  destroy [session_id] - Destroy session (or all if no ID, no confirmation)",
-      "  diff [session_id]    - Show diff viewer for a session",
-      "  show [session_id]    - Alias for 'diff'",
+      "  show [session_id]    - Show diff viewer for a session",
       "  stats [session_id]   - Show session statistics",
       "  help                 - Show this help message",
     }
@@ -175,7 +178,7 @@ end, {
 
     -- Complete subcommands
     if num_args == 1 or (num_args == 2 and not cmd_line:match("%s$")) then
-      local subcommands = { "start", "pause", "resume", "stop", "destroy", "diff", "show", "stats", "help" }
+      local subcommands = { "start", "pause", "resume", "stop", "destroy", "show", "stats", "help" }
       return vim.tbl_filter(function(s)
         return s:find(arg_lead, 1, true) == 1
       end, subcommands)
@@ -189,7 +192,6 @@ end, {
         or subcmd == "resume"
         or subcmd == "stop"
         or subcmd == "destroy"
-        or subcmd == "diff"
         or subcmd == "show"
         or subcmd == "stats"
       then

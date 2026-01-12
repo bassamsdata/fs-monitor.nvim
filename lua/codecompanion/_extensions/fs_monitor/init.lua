@@ -119,7 +119,7 @@ local function setup_autocommands()
           })
         else
           local session = fs_monitor.get_session(session_id)
-          if session and not session.watch_id then
+          if session and not session.active_watcher_id then
             fs_monitor.start(session_id, vim.fn.getcwd(), {
               prepopulate = true,
               recursive = true,

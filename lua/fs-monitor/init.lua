@@ -54,7 +54,7 @@ function M.create_session(opts)
     monitor = monitor,
     changes = {},
     checkpoints = {},
-    watch_id = nil,
+    active_watcher_id = nil,
     started_at = vim.uv.hrtime(),
     metadata = opts.metadata or {},
   }
@@ -77,11 +77,11 @@ function M.get_all_sessions()
   return M._sessions
 end
 
----Start monitoring for a session (first time or resume)
----@param session_id string
+---Start monitoring for a session
+---@param session_id string Session must already exist
 ---@param target_path? string Path to monitor (default: cwd)
 ---@param opts? { prepopulate?: boolean, recursive?: boolean, on_ready?: fun(stats: FSMonitor.PrepopulateStats) }
----@return string|nil watch_id
+---@return string|nil active_watcher_id
 function M.start(session_id, target_path, opts)
   local session = M._sessions[session_id]
   if not session then
@@ -102,7 +102,7 @@ function M.start(session_id, target_path, opts)
   })
 
   if watch_id and watch_id ~= "" then
-    session.watch_id = watch_id
+    session.active_watcher_id = watch_id
 
     fire_event("FSMonitorStarted", {
       session_id = session_id,
@@ -128,16 +128,16 @@ function M.pause(session_id, callback)
     return
   end
 
-  if not session.watch_id then
+  if not session.active_watcher_id then
     if callback then callback({}) end
     return
   end
 
-  local watch_id = session.watch_id
+  local watch_id = session.active_watcher_id
 
   session.monitor:stop_monitoring_async(watch_id, function(new_changes)
     vim.list_extend(session.changes, new_changes)
-    session.watch_id = nil
+    session.active_watcher_id = nil
 
     fire_event("FSMonitorStopped", {
       session_id = session_id,
@@ -151,10 +151,10 @@ function M.pause(session_id, callback)
 end
 
 ---Resume monitoring for an existing session
----@param session_id string
+---@param session_id string Session must already exist
 ---@param target_path? string Path to monitor (default: cwd)
 ---@param opts? { prepopulate?: boolean, recursive?: boolean, on_ready?: fun(stats: FSMonitor.PrepopulateStats) }
----@return string|nil watch_id
+---@return string|nil active_watcher_id
 function M.resume(session_id, target_path, opts)
   local session = M._sessions[session_id]
   if not session then
@@ -165,12 +165,12 @@ function M.resume(session_id, target_path, opts)
     return nil
   end
 
-  if session.watch_id then
+  if session.active_watcher_id then
     require("fs-monitor.utils.util").notify(
       string.format("Session already monitoring: %s", session_id),
       vim.log.levels.WARN
     )
-    return session.watch_id
+    return session.active_watcher_id
   end
 
   return M.start(session_id, target_path, opts)
@@ -178,12 +178,12 @@ end
 
 ---Stop and finalize session (prompts for confirmation if changes exist)
 ---@param session_id string
----@param opts? { force?: boolean, callback?: fun() }
+---@param opts? { force?: boolean, callback?: fun(destroyed: boolean) }
 function M.stop(session_id, opts)
   opts = opts or {}
   local session = M._sessions[session_id]
   if not session then
-    if opts.callback then opts.callback() end
+    if opts.callback then opts.callback(false) end
     return
   end
 
@@ -191,7 +191,9 @@ function M.stop(session_id, opts)
   local has_changes = #changes > 0
 
   local function do_destroy()
-    M.destroy(session_id, opts.callback)
+    M.destroy(session_id, function()
+      if opts.callback then opts.callback(true) end
+    end)
   end
 
   if opts.force or not has_changes then
@@ -205,7 +207,7 @@ function M.stop(session_id, opts)
     if choice == "Yes" then
       do_destroy()
     elseif opts.callback then
-      opts.callback()
+      opts.callback(false)
     end
   end)
 end
