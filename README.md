@@ -56,11 +56,14 @@ Once enabled, fs-monitor will automatically:
 :FSMonitor <subcommand> [args]
 
 Subcommands:
-  start [session_id]  - Start a new monitoring session
-  stop [session_id]   - Stop a session
-  diff [session_id]   - Show diff viewer for a session
-  stats [session_id]  - Show session statistics
-  help                - Show this help message
+  start [session_id]   - Start a new monitoring session
+  pause <session_id>   - Pause monitoring (keeps session alive)
+  resume <session_id>  - Resume monitoring existing session
+  stop <session_id>    - Stop and destroy session (with confirmation)
+  destroy [session_id] - Destroy session (or all if no ID)
+  show [session_id]    - Show diff viewer for a session
+  stats [session_id]   - Show session statistics
+  help                 - Show this help message
 ```
 
 ## Standalone Usage
@@ -81,8 +84,19 @@ fs_monitor.start(session.id, vim.fn.getcwd(), {
 
 -- ... AI/LLM makes changes to files ...
 
+-- Pause monitoring temporarily (keeps session alive)
+fs_monitor.pause(session.id)
+
 -- Create a checkpoint after changes
 fs_monitor.create_checkpoint(session.id, "After first response")
+
+-- Resume monitoring for more changes
+fs_monitor.resume(session.id)
+
+-- ... more changes happen ...
+
+-- Pause again
+fs_monitor.pause(session.id)
 
 -- Show the diff viewer
 fs_monitor.show_diff(session.id)
@@ -90,8 +104,8 @@ fs_monitor.show_diff(session.id)
 -- Revert to a checkpoint
 fs_monitor.revert_to_checkpoint(session.id, 1)
 
--- Clean up
-fs_monitor.destroy_session(session.id)
+-- Clean up (no confirmation in code)
+fs_monitor.destroy(session.id)
 ```
 
 For more integration examples (Claude Code, multi-tool tracking, event-based integration), see [docs/examples.md](docs/examples.md).
@@ -147,11 +161,13 @@ fs_monitor.setup(opts)
 -- Session Management
 fs_monitor.create_session({ id?, metadata? })
 fs_monitor.get_session(session_id)
-fs_monitor.destroy_session(session_id, callback?)
+fs_monitor.destroy(session_id, callback?)
 
 -- Monitoring
 fs_monitor.start(session_id, target_path?, opts?)
-fs_monitor.stop(session_id, callback?)
+fs_monitor.pause(session_id, callback?)
+fs_monitor.resume(session_id, target_path?, opts?)
+fs_monitor.stop(session_id, { force?, callback? })
 
 -- Changes & Checkpoints
 fs_monitor.get_changes(session_id)

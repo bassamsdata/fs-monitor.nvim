@@ -24,8 +24,8 @@ fs_monitor.start(session.id, vim.fn.getcwd(), {
   end,
 })
 
--- 3. After AI response, stop monitoring and create checkpoint
-fs_monitor.stop(session.id, function(changes)
+-- 3. After AI response, pause monitoring and create checkpoint
+fs_monitor.pause(session.id, function(changes)
   if #changes > 0 then
     fs_monitor.create_checkpoint(session.id, "Response 1")
   end
@@ -35,7 +35,7 @@ end)
 fs_monitor.show_diff(session.id)
 
 -- 5. Clean up when done
-fs_monitor.destroy_session(session.id)
+fs_monitor.destroy(session.id)
 ```
 
 ## Claude Code / Agentic Tool Integration
@@ -82,13 +82,10 @@ function ClaudeMonitor.on_response_complete(conversation_id)
 
   ctx.turn_count = ctx.turn_count + 1
 
-  fs_monitor.stop(ctx.session_id, function(changes)
+  fs_monitor.pause(ctx.session_id, function(changes)
     if #changes > 0 then
       local label = string.format("Turn %d - %d changes", ctx.turn_count, #changes)
       fs_monitor.create_checkpoint(ctx.session_id, label)
-
-      -- Restart monitoring for next turn
-      fs_monitor.start(ctx.session_id)
     end
   end)
 end
@@ -111,7 +108,7 @@ function ClaudeMonitor.end_session(conversation_id)
   local ctx = ClaudeMonitor.sessions[conversation_id]
   if not ctx then return end
 
-  fs_monitor.destroy_session(ctx.session_id, function()
+  fs_monitor.destroy(ctx.session_id, function()
     ClaudeMonitor.sessions[conversation_id] = nil
   end)
 end
@@ -195,14 +192,14 @@ vim.api.nvim_create_autocmd("User", {
   end,
 })
 
--- Track when monitoring stops
+-- Track when monitoring pauses
 vim.api.nvim_create_autocmd("User", {
   pattern = "FSMonitorStopped",
   callback = function(event)
     local data = event.data
     if data.change_count > 0 then
       vim.notify(
-        string.format("[fs-monitor] Stopped. %d new changes detected.", data.change_count),
+        string.format("[fs-monitor] Paused. %d new changes detected.", data.change_count),
         vim.log.levels.INFO
       )
     end
