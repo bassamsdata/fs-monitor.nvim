@@ -44,7 +44,7 @@ T["Monitor"]["can start and stop a session"] = function()
 
   child.lua([[
     _G.stopped = false
-    fs_monitor.stop("test_session", function(changes)
+    fs_monitor.pause("test_session", function(changes)
       _G.changes = changes
       _G.stopped = true
     end)
@@ -68,12 +68,11 @@ T["Monitor"]["detects file creation"] = function()
     f:close()
   ]])
 
-  -- Wait for debounce
-  child.wait(1000)
+  child.wait(500)
 
   child.lua([[
     _G.stopped = false
-    fs_monitor.stop("test_creation", function(changes)
+    fs_monitor.pause("test_creation", function(changes)
       _G.changes = changes
       _G.stopped = true
     end)
@@ -90,7 +89,6 @@ end
 
 T["Monitor"]["detects file modification"] = function()
   child.lua([[
-    -- Create initial file
     local path = vim.fs.joinpath(_G.TEST_DIR, "mod.txt")
     local f = io.open(path, "w")
     f:write("original")
@@ -102,7 +100,6 @@ T["Monitor"]["detects file modification"] = function()
     -- Wait for prepopulate
     vim.wait(200)
 
-    -- Modify file
     f = io.open(path, "w")
     f:write("modified")
     f:close()
@@ -112,7 +109,7 @@ T["Monitor"]["detects file modification"] = function()
 
   child.lua([[
     _G.stopped = false
-    fs_monitor.stop("test_mod", function(changes)
+    fs_monitor.pause("test_mod", function(changes)
       _G.changes = changes
       _G.stopped = true
     end)
@@ -142,21 +139,20 @@ T["Monitor"]["detects file deletion"] = function()
     -- Wait for prepopulate
     vim.wait(200)
 
-    -- Delete file
     os.remove(path)
   ]])
 
-  child.wait(1000)
+  child.wait(500)
 
   child.lua([[
     _G.stopped = false
-    fs_monitor.stop("test_del", function(changes)
+    fs_monitor.pause("test_del", function(changes)
       _G.changes = changes
       _G.stopped = true
     end)
   ]])
 
-  child.wait(1000, "_G.stopped == true")
+  child.wait(500, "_G.stopped == true")
   local changes = child.lua_get("_G.changes")
 
   h.eq(1, #changes)
@@ -240,13 +236,13 @@ T["Session"]["supports multiple concurrent sessions"] = function()
   h.eq(true, child.lua_get("_G.has_s3"))
 end
 
-T["Session"]["destroy_session removes session"] = function()
+T["Session"]["destroy removes session"] = function()
   child.lua([[
     fs_monitor.create_session({ id = "to_destroy" })
     _G.exists_before = fs_monitor.get_session("to_destroy") ~= nil
 
     _G.destroyed = false
-    fs_monitor.destroy_session("to_destroy", function()
+    fs_monitor.destroy("to_destroy", function()
       _G.destroyed = true
     end)
   ]])
@@ -353,6 +349,190 @@ T["Stats"]["get_stats returns stats for valid session"] = function()
 
   h.eq(true, child.lua_get("_G.has_total"))
   h.eq(true, child.lua_get("_G.has_active"))
+end
+
+T["PauseResume"] = new_set()
+
+T["PauseResume"]["pause sets active_watcher_id to nil"] = function()
+  child.lua([[
+    fs_monitor.create_session({ id = "pause_test" })
+    fs_monitor.start("pause_test", _G.TEST_DIR)
+
+    local session = fs_monitor.get_session("pause_test")
+    _G.has_watcher_before = session.active_watcher_id ~= nil
+
+    _G.paused = false
+    fs_monitor.pause("pause_test", function()
+      _G.paused = true
+    end)
+  ]])
+
+  child.wait(200, "_G.paused == true")
+
+  child.lua([[
+    local session = fs_monitor.get_session("pause_test")
+    _G.has_watcher_after = session.active_watcher_id ~= nil
+  ]])
+
+  h.eq(true, child.lua_get("_G.has_watcher_before"))
+  h.eq(false, child.lua_get("_G.has_watcher_after"))
+end
+
+T["PauseResume"]["resume restores active_watcher_id"] = function()
+  child.lua([[
+    fs_monitor.create_session({ id = "resume_test" })
+    fs_monitor.start("resume_test", _G.TEST_DIR)
+
+    _G.paused = false
+    fs_monitor.pause("resume_test", function()
+      _G.paused = true
+    end)
+  ]])
+
+  child.wait(200, "_G.paused == true")
+
+  child.lua([[
+    local session = fs_monitor.get_session("resume_test")
+    _G.has_watcher_paused = session.active_watcher_id ~= nil
+
+    _G.resumed_watcher_id = fs_monitor.resume("resume_test", _G.TEST_DIR)
+  ]])
+
+  child.lua([[
+    local session = fs_monitor.get_session("resume_test")
+    _G.has_watcher_resumed = session.active_watcher_id ~= nil
+  ]])
+
+  h.eq(false, child.lua_get("_G.has_watcher_paused"))
+  h.eq(true, child.lua_get("_G.has_watcher_resumed"))
+  h.not_eq(nil, child.lua_get("_G.resumed_watcher_id"))
+end
+
+T["PauseResume"]["resume fails on nonexistent session"] = function()
+  child.lua([[
+    _G.resumed_watcher_id = fs_monitor.resume("nonexistent", _G.TEST_DIR)
+  ]])
+
+  h.eq(vim.NIL, child.lua_get("_G.resumed_watcher_id"))
+end
+
+T["PauseResume"]["resume warns if already monitoring"] = function()
+  child.lua([[
+    fs_monitor.create_session({ id = "already_monitoring" })
+    fs_monitor.start("already_monitoring", _G.TEST_DIR)
+
+    _G.first_watcher = fs_monitor.get_session("already_monitoring").active_watcher_id
+    _G.second_watcher = fs_monitor.resume("already_monitoring", _G.TEST_DIR)
+  ]])
+
+  local first = child.lua_get("_G.first_watcher")
+  local second = child.lua_get("_G.second_watcher")
+
+  h.eq(first, second)
+end
+
+T["PauseResume"]["pause-resume-pause cycle preserves changes"] = function()
+  child.lua([[
+    fs_monitor.create_session({ id = "cycle_test" })
+    fs_monitor.start("cycle_test", _G.TEST_DIR)
+    vim.wait(100)
+
+    -- Create file during first monitoring
+    local f = io.open(vim.fs.joinpath(_G.TEST_DIR, "cycle1.txt"), "w")
+    f:write("first")
+    f:close()
+  ]])
+
+  child.wait(500)
+
+  child.lua([[
+    _G.paused1 = false
+    fs_monitor.pause("cycle_test", function(changes)
+      _G.changes_after_pause1 = #changes
+      _G.paused1 = true
+    end)
+  ]])
+
+  child.wait(500, "_G.paused1 == true")
+
+  child.lua([[
+    fs_monitor.resume("cycle_test", _G.TEST_DIR)
+    vim.wait(100)
+
+    -- Create file during second monitoring
+    local f = io.open(vim.fs.joinpath(_G.TEST_DIR, "cycle2.txt"), "w")
+    f:write("second")
+    f:close()
+  ]])
+
+  child.wait(1000)
+
+  child.lua([[
+    _G.paused2 = false
+    fs_monitor.pause("cycle_test", function(changes)
+      _G.changes_after_pause2 = #changes
+      _G.paused2 = true
+    end)
+  ]])
+
+  child.wait(500, "_G.paused2 == true")
+
+  child.lua([[
+    local all_changes = fs_monitor.get_changes("cycle_test")
+    _G.total_changes = #all_changes
+  ]])
+
+  h.eq(1, child.lua_get("_G.changes_after_pause1"))
+  h.eq(1, child.lua_get("_G.changes_after_pause2"))
+  h.eq(2, child.lua_get("_G.total_changes"))
+end
+
+T["Stop"] = new_set()
+
+T["Stop"]["stop with force destroys session"] = function()
+  child.lua([[
+    fs_monitor.create_session({ id = "force_stop" })
+    fs_monitor.start("force_stop", _G.TEST_DIR)
+
+    _G.stopped = false
+    fs_monitor.stop("force_stop", {
+      force = true,
+      callback = function()
+        _G.stopped = true
+      end
+    })
+  ]])
+
+  child.wait(500, "_G.stopped == true")
+
+  child.lua([[
+    _G.exists_after = fs_monitor.get_session("force_stop") ~= nil
+  ]])
+
+  h.eq(false, child.lua_get("_G.exists_after"))
+end
+
+T["Stop"]["stop without changes destroys immediately"] = function()
+  child.lua([[
+    fs_monitor.create_session({ id = "no_changes_stop" })
+    fs_monitor.start("no_changes_stop", _G.TEST_DIR)
+    vim.wait(100)
+
+    _G.stopped = false
+    fs_monitor.stop("no_changes_stop", {
+      callback = function()
+        _G.stopped = true
+      end
+    })
+  ]])
+
+  child.wait(500, "_G.stopped == true")
+
+  child.lua([[
+    _G.exists_after = fs_monitor.get_session("no_changes_stop") ~= nil
+  ]])
+
+  h.eq(false, child.lua_get("_G.exists_after"))
 end
 
 return T

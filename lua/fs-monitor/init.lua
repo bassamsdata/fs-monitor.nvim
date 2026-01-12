@@ -54,7 +54,7 @@ function M.create_session(opts)
     monitor = monitor,
     changes = {},
     checkpoints = {},
-    watch_id = nil,
+    active_watcher_id = nil,
     started_at = vim.uv.hrtime(),
     metadata = opts.metadata or {},
   }
@@ -78,10 +78,10 @@ function M.get_all_sessions()
 end
 
 ---Start monitoring for a session
----@param session_id string
+---@param session_id string Session must already exist
 ---@param target_path? string Path to monitor (default: cwd)
 ---@param opts? { prepopulate?: boolean, recursive?: boolean, on_ready?: fun(stats: FSMonitor.PrepopulateStats) }
----@return string|nil watch_id
+---@return string|nil active_watcher_id
 function M.start(session_id, target_path, opts)
   local session = M._sessions[session_id]
   if not session then
@@ -102,7 +102,7 @@ function M.start(session_id, target_path, opts)
   })
 
   if watch_id and watch_id ~= "" then
-    session.watch_id = watch_id
+    session.active_watcher_id = watch_id
 
     fire_event("FSMonitorStarted", {
       session_id = session_id,
@@ -118,26 +118,26 @@ function M.start(session_id, target_path, opts)
   return nil
 end
 
----Stop monitoring for a session and get changes
+---Pause monitoring for a session
 ---@param session_id string
 ---@param callback? fun(changes: FSMonitor.Change[])
-function M.stop(session_id, callback)
+function M.pause(session_id, callback)
   local session = M._sessions[session_id]
   if not session then
     if callback then callback({}) end
     return
   end
 
-  if not session.watch_id then
+  if not session.active_watcher_id then
     if callback then callback({}) end
     return
   end
 
-  local watch_id = session.watch_id
+  local watch_id = session.active_watcher_id
 
   session.monitor:stop_monitoring_async(watch_id, function(new_changes)
     vim.list_extend(session.changes, new_changes)
-    session.watch_id = nil
+    session.active_watcher_id = nil
 
     fire_event("FSMonitorStopped", {
       session_id = session_id,
@@ -147,6 +147,68 @@ function M.stop(session_id, callback)
     })
 
     if callback then callback(new_changes) end
+  end)
+end
+
+---Resume monitoring for an existing session
+---@param session_id string Session must already exist
+---@param target_path? string Path to monitor (default: cwd)
+---@param opts? { prepopulate?: boolean, recursive?: boolean, on_ready?: fun(stats: FSMonitor.PrepopulateStats) }
+---@return string|nil active_watcher_id
+function M.resume(session_id, target_path, opts)
+  local session = M._sessions[session_id]
+  if not session then
+    require("fs-monitor.utils.util").notify(
+      string.format("Cannot resume: session not found: %s", session_id),
+      vim.log.levels.ERROR
+    )
+    return nil
+  end
+
+  if session.active_watcher_id then
+    require("fs-monitor.utils.util").notify(
+      string.format("Session already monitoring: %s", session_id),
+      vim.log.levels.WARN
+    )
+    return session.active_watcher_id
+  end
+
+  return M.start(session_id, target_path, opts)
+end
+
+---Stop and finalize session (prompts for confirmation if changes exist)
+---@param session_id string
+---@param opts? { force?: boolean, callback?: fun(destroyed: boolean) }
+function M.stop(session_id, opts)
+  opts = opts or {}
+  local session = M._sessions[session_id]
+  if not session then
+    if opts.callback then opts.callback(false) end
+    return
+  end
+
+  local changes = session.monitor:get_all_changes()
+  local has_changes = #changes > 0
+
+  local function do_destroy()
+    M.destroy(session_id, function()
+      if opts.callback then opts.callback(true) end
+    end)
+  end
+
+  if opts.force or not has_changes then
+    do_destroy()
+    return
+  end
+
+  vim.ui.select({ "Yes", "No" }, {
+    prompt = string.format("Stop session '%s' and destroy %d change(s)?", session_id, #changes),
+  }, function(choice)
+    if choice == "Yes" then
+      do_destroy()
+    elseif opts.callback then
+      opts.callback(false)
+    end
   end)
 end
 
@@ -257,7 +319,7 @@ end
 ---Destroy a session and clean up resources
 ---@param session_id string
 ---@param callback? fun()
-function M.destroy_session(session_id, callback)
+function M.destroy(session_id, callback)
   local session = M._sessions[session_id]
   if not session then
     if callback then callback() end
@@ -282,7 +344,7 @@ function M.clear_all(callback)
   end
 
   for _, session_id in ipairs(session_ids) do
-    M.destroy_session(session_id, function()
+    M.destroy(session_id, function()
       remaining = remaining - 1
       if remaining == 0 and callback then callback() end
     end)

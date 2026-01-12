@@ -245,7 +245,7 @@
 ---@field monitor FSMonitor.Monitor The monitor instance
 ---@field changes FSMonitor.Change[] Accumulated changes
 ---@field checkpoints FSMonitor.Checkpoint[] Checkpoints created during session
----@field watch_id? string Active watch ID
+---@field active_watcher_id? string Active watcher ID (nil when paused)
 ---@field started_at number Session start timestamp
 ---@field metadata table User-defined metadata
 

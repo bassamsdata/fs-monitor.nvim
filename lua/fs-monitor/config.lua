@@ -32,24 +32,24 @@ M.default_options = {
     word_diff = true,
 
     icons = {
-      created = " ",
-      deleted = " 󰺝",
+      created = "",
+      deleted = "󰺝",
       modified = "",
-      renamed = " ",
-      transient = " 󰚌", -- Alter: "±", "~", "⚡"
+      renamed = "",
+      transient = "󰚌", -- Alter: "±", "~", "⚡"
       checkpoint = " 󱘈",
       file_selector = "▶ ",
       sign = "▌",
     },
 
     titles = {
-      files = "  Changed Files ",
+      files = "  Changed Files ",
       checkpoints = " 󱘈 Checkpoints ",
       preview = " 󰈹 Diff Preview ",
     },
 
     keymaps = {
-      -- stylua: ignore start 
+      -- stylua: ignore start
       close             = { key = "q",     desc = "Close viewer"       },
       close_alt         = { key = "<Esc>", desc = "Close viewer"       },
       next_file         = { key = "]f",    desc = "Next file"          },
