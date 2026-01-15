@@ -8,15 +8,17 @@ local T = new_set({
     pre_case = function()
       h.child_start(child)
       child.lua([[
-        Actions = require("fs-monitor.diff.actions")
+        Actions = require("fs-monitor.viewer.ui")
+        Navigation = require("fs-monitor.viewer.navigation")
+        Operations = require("fs-monitor.viewer.operations")
         _G.api = vim.api
-        
+
         -- Mock state object
         _G.create_mock_state = function()
           local files_buf = api.nvim_create_buf(false, true)
           local checkpoints_buf = api.nvim_create_buf(false, true)
           local right_buf = api.nvim_create_buf(false, true)
-          
+
           local files_win = api.nvim_open_win(files_buf, false, {relative='editor', row=0, col=0, width=10, height=10})
           local checkpoints_win = api.nvim_open_win(checkpoints_buf, false, {relative='editor', row=11, col=0, width=10, height=10})
           local right_win = api.nvim_open_win(right_buf, false, {relative='editor', row=0, col=11, width=20, height=21})
@@ -74,7 +76,7 @@ T["Actions"] = new_set()
 T["Actions"]["update_preview()"] = function()
   child.lua([[
     _G.state = _G.create_mock_state()
-    Actions.update_preview(_G.state, 1)
+    Navigation.update_preview(_G.state, 1)
   ]])
   local lines = child.lua_get("api.nvim_buf_get_lines(_G.state.right_buf, 0, -1, false)")
   h.expect_gt(#lines, 0)
@@ -85,13 +87,13 @@ end
 T["Actions"]["navigate_files()"] = function()
   child.lua([[
     _G.state = _G.create_mock_state()
-    Actions.navigate_files(_G.state, 1) -- move to test2.lua
+    Navigation.navigate_files(_G.state, 1) -- move to test2.lua
   ]])
   h.eq(2, child.lua_get("_G.state.selected_file_idx"))
   h.eq("test2.lua", child.lua_get("_G.state.current_filepath"))
 
   child.lua([[
-    Actions.navigate_files(_G.state, -1) -- move back to test1.lua
+    Navigation.navigate_files(_G.state, -1) -- move back to test1.lua
   ]])
   h.eq(1, child.lua_get("_G.state.selected_file_idx"))
   h.eq("test1.lua", child.lua_get("_G.state.current_filepath"))
@@ -103,18 +105,18 @@ T["Actions"]["jump_next_hunk() and jump_prev_hunk()"] = function()
     -- Multiple hunks
     _G.state.summary.by_file["test1.lua"].changes[1].old_content = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10"
     _G.state.summary.by_file["test1.lua"].changes[1].new_content = "1\nmod\n3\n4\n5\n6\n7\nmod2\n9\n10"
-    Actions.update_preview(_G.state, 1)
-    
+    Navigation.update_preview(_G.state, 1)
+
     api.nvim_set_current_win(_G.state.right_win)
     api.nvim_win_set_cursor(_G.state.right_win, {1, 0})
-    
-    Actions.jump_next_hunk(_G.state)
+
+    Navigation.jump_next_hunk(_G.state)
     _G.pos1 = api.nvim_win_get_cursor(_G.state.right_win)
-    
-    Actions.jump_next_hunk(_G.state)
+
+    Navigation.jump_next_hunk(_G.state)
     _G.pos2 = api.nvim_win_get_cursor(_G.state.right_win)
-    
-    Actions.jump_prev_hunk(_G.state)
+
+    Navigation.jump_prev_hunk(_G.state)
     _G.pos3 = api.nvim_win_get_cursor(_G.state.right_win)
   ]])
 
@@ -129,14 +131,14 @@ end
 T["Actions"]["revert_current_hunk()"] = function()
   child.lua([[
     _G.state = _G.create_mock_state()
-    
+
     local test_file = "revert_test.txt"
     -- Use uv.cwd() to ensure we know where we are
     local cwd = vim.uv.cwd()
     local absolute_path = cwd .. "/" .. test_file
-    
+
     vim.fn.writefile({"line1", "modified", "line3"}, absolute_path)
-    
+
     _G.state.current_filepath = test_file
     _G.state.summary.files = { test_file }
     _G.state.summary.by_file[test_file] = {
@@ -145,15 +147,15 @@ T["Actions"]["revert_current_hunk()"] = function()
         { old_content = "line1\noriginal\nline3", new_content = "line1\nmodified\nline3" }
       }
     }
-    
+
     -- Mock FSMonitor and UI
     _G.state.fs_monitor = { changes = {} }
     _G.state.generate_summary = function() return _G.state.summary end
-    
+
     require("fs-monitor.utils.ui").confirm = function() return 1 end -- Auto-confirm
-    
-    Actions.update_preview(_G.state, 1)
-    
+
+    Navigation.update_preview(_G.state, 1)
+
     -- Find the line with "modified" in the right buffer
     local lines = api.nvim_buf_get_lines(_G.state.right_buf, 0, -1, false)
     local target_line = 1
@@ -164,9 +166,9 @@ T["Actions"]["revert_current_hunk()"] = function()
       end
     end
     api.nvim_win_set_cursor(_G.state.right_win, {target_line, 0})
-    
-    Actions.revert_current_hunk(_G.state)
-    
+
+    Operations.revert_current_hunk(_G.state, function() end)
+
     _G.reverted_content = vim.fn.readfile(absolute_path)
     os.remove(absolute_path)
   ]])
@@ -196,7 +198,7 @@ T["Actions"]["reset_checkpoint_filter()"] = function()
       end
     }
 
-    Actions.reset_checkpoint_filter(_G.state)
+    Navigation.reset_checkpoint_filter(_G.state, function() end)
 
     -- Cleanup mock
     package.loaded["fs-monitor.diff.render"] = nil

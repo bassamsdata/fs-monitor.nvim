@@ -8,7 +8,7 @@ local T = new_set({
     pre_case = function()
       h.child_start(child)
       child.lua([[
-        diff_utils = require("fs-monitor.diff.hunks")
+        diff_utils = require("fs-monitor.viewer.hunk_calculator")
       ]])
     end,
     post_once = child.stop,

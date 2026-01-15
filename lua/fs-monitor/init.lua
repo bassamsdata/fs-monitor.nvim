@@ -273,8 +273,8 @@ function M.show_diff(session_id, opts)
       return
     end
 
-    local diff = require("fs-monitor.diff")
-    diff.show(changes, session.checkpoints, {
+  local viewer = require("fs-monitor.viewer")
+  viewer.show(changes, session.checkpoints, {
       fs_monitor = session.monitor,
       on_revert = function(new_changes, new_checkpoints)
         session.changes = new_changes
@@ -365,16 +365,19 @@ end
 ---@type FSMonitor.Monitor
 M.Monitor = nil
 
----@type FSMonitor.Diff
-M.Diff = nil
+---@type FSMonitor.Viewer
+M.Viewer = nil
 
 setmetatable(M, {
   __index = function(t, k)
     if k == "Monitor" then
       t.Monitor = require("fs-monitor.monitor")
       return t.Monitor
+    elseif k == "Viewer" then
+      t.Viewer = require("fs-monitor.viewer")
+      return t.Viewer
     elseif k == "Diff" then
-      t.Diff = require("fs-monitor.diff")
+      t.Diff = require("fs-monitor.viewer")
       return t.Diff
     end
   end,

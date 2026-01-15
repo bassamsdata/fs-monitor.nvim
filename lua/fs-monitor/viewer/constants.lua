@@ -1,4 +1,4 @@
----@class FSMonitor.Diff.Constants
+---@class FSMonitor.Viewer.Constants
 local M = {}
 
 -- Extmark highlight priorities

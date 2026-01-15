@@ -1,40 +1,48 @@
 ---@module "fs-monitor.types"
 --[[
-File System Monitor - Event-based file change tracking
+===============================================================================
+    File:       fs-monitor/monitor.lua
+    Author:     Bassam Data (https://github.com/bassamsdata)
+-------------------------------------------------------------------------------
+    Description:
+      Tracks file changes in real-time using OS-level file system events.
+      Unlike snapshot-based approaches, it monitors actual file system notifications
+      and maintains a content cache for efficient diffing.
 
-This module tracks file changes in real-time using OS-level file system events.
-Unlike snapshot-based approaches, it monitors actual file system notifications
-and maintains a content cache for efficient diffing.
+      Architecture:
+        • Uses vim.uv.new_fs_event() for OS-level file watching
+        • Async file I/O with vim.uv.fs_* functions (never blocks Neovim)
+        • Debounced event processing to handle rapid changes
+        • Content cache with "insert returns old" pattern for easy diffing
 
-Architecture:
-- Uses vim.uv.new_fs_event() for OS-level file watching
-- Async file I/O with vim.uv.fs_* functions (never blocks Neovim)
-- Debounced event processing to handle rapid changes
-- Content cache with "insert returns old" pattern for easy diffing
+      Key Design:
+        • Changes are registered via async file reads (non-blocking)
+        • stop_monitoring_async() waits for all pending operations before calling back
+        • Uses uv.fs_opendir/readdir for efficient directory scanning
+        • Timestamp-based attribution links changes to specific tools
+        • Respects .gitignore patterns for intelligent file filtering
 
-Key Design:
-- Changes are registered via async file reads (non-blocking)
-- stop_monitoring_async() waits for all pending operations before calling back
-- Uses uv.fs_opendir/readdir for efficient directory scanning
-- Timestamp-based attribution links changes to specific tools
-- Respects .gitignore patterns for intelligent file filtering
+      API Overview:
+        Core Monitoring:
+          - start_monitoring(tool_name, target_path, opts) -> watch_id
+          - stop_monitoring_async(watch_id, callback)
+          - tag_changes_in_range(start_time, end_time, tool_name, tool_args)
 
-API Overview:
-  Core Monitoring:
-    - start_monitoring(tool_name, target_path, opts) -> watch_id
-    - stop_monitoring_async(watch_id, callback)
-    - tag_changes_in_range(start_time, end_time, tool_name, tool_args)
+        Checkpoints:
+          - create_checkpoint() -> checkpoint
+          - get_changes_since_checkpoint(checkpoint) -> Change[]
 
-  Checkpoints:
-    - create_checkpoint() -> checkpoint
-    - get_changes_since_checkpoint(checkpoint) -> Change[]
-
-  Change Retrieval:
-    - get_all_changes() -> Change[]
-    - get_changes_by_tool(tool_name) -> Change[]
-    - get_stats() -> stats
-    - clear_changes()
-]]
+        Change Retrieval:
+          - get_all_changes() -> Change[]
+          - get_changes_by_tool(tool_name) -> Change[]
+          - get_stats() -> stats
+          - clear_changes()
+-------------------------------------------------------------------------------
+    Attribution:
+      If you use or distribute this code, please credit:
+      Bassam Data (https://github.com/bassamsdata)
+===============================================================================
+--]]
 
 local uv = vim.uv
 local lru = require("fs-monitor.utils.lru")
@@ -80,9 +88,6 @@ function FSMonitor.new(opts)
     custom_ignore_patterns = opts.ignore_patterns or {},
     never_ignore_patterns = opts.never_ignore or {},
   }, FSMonitor)
-
-  -- gitignore patterns will be loaded when monitoring starts
-  -- to use the correct watch root path
 
   log:debug("Created monitor session: %s", monitor.session_id)
   return monitor
@@ -281,6 +286,21 @@ local function _detect_rename(self, new_change)
   return _detect_rename_by_hash(self, new_change)
 end
 
+---Warn when cache usage exceeds 90% of the configured limit
+---@private
+---@param monitor FSMonitor.Monitor
+---@param watch table @watch table containing cache info
+local function _warn_cache_pressure(monitor, watch)
+  local used = watch.cache.bytes or 0
+  if used > 0.9 * monitor.max_cache_bytes then
+    log:warn(
+      "FSMonitor cache >90%% full (%d KB / %d KB)",
+      math.floor(used / 1024),
+      math.floor(monitor.max_cache_bytes / 1024)
+    )
+  end
+end
+
 ---Register a change in the changes list
 ---@param change FSMonitor.Change
 function FSMonitor:_register_change(change)
@@ -458,7 +478,10 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
         })
       end
 
-      if should_cache and new_content then lru.set(watch.cache, relative_path, new_content) end
+      if should_cache and new_content then
+        lru.set(watch.cache, relative_path, new_content)
+        _warn_cache_pressure(self, watch)
+      end
 
       if on_complete then on_complete() end
     end)

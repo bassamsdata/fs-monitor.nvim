@@ -1,11 +1,11 @@
----@class FSMonitor.Diff.WordDiff
+---@class FSMonitor.Viewer.WordDiff
 --[[
 This module implements word-level diffing to highlight granular changes within lines.
 Many functions was copied and modified by the excellent inline word diffing implementation in sidekick.nvim by folke.
 ]]
 local M = {}
 
-local constants = require("fs-monitor.diff.constants")
+local constants = require("fs-monitor.viewer.constants")
 
 local MAX_LINES_FOR_WORD_DIFF = constants.MAX_LINES_FOR_WORD_DIFF
 local WORD_HIGHLIGHT_PRIORITY = constants.WORD_HIGHLIGHT_PRIORITY
