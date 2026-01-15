@@ -3,7 +3,7 @@
 Lightweight, real-time filesystem monitoring for Neovim. Track file changes made by AI/LLM tools during code generation sessions with checkpoint-based revert support.
 
 
-https://github.com/user-attachments/assets/20a05c8f-9098-4070-9870-690d0d39c946
+https://github.com/user-attachments/assets/0b355ce5-4c62-4b63-a4bc-fcf219b78cbe
 
 
 Originally developed as a PR for CodeCompanion.nvim. For earlier history, see [PR #2281](https://github.com/olimorris/codecompanion.nvim/pull/2281).
