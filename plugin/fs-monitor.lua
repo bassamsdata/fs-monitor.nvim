@@ -28,6 +28,15 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
     else
       fs_monitor.pause(session_id, function(changes)
         vim.schedule(function()
+          local session = fs_monitor.get_session(session_id)
+          if session and #changes > 0 then
+            if not session.pause_counter then session.pause_counter = 0 end
+            session.pause_counter = session.pause_counter + 1
+            local label = string.format("Pause #%d", session.pause_counter)
+            pcall(function()
+              fs_monitor.create_checkpoint(session_id, label)
+            end)
+          end
           util.notify(string.format("Session paused: %s (%d changes)", session_id, #changes))
         end)
       end)
@@ -149,6 +158,35 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
         util.notify(string.format("Session not found: %s", session_id), vim.log.levels.WARN)
       end
     end
+  elseif subcmd == "worktree" then
+    local session_id = args[2]
+    if not session_id or session_id == "" then
+      local sessions = fs_monitor.get_all_sessions()
+      local session_ids = vim.tbl_keys(sessions)
+
+      if #session_ids == 0 then
+        util.notify("No active sessions")
+        return
+      end
+
+      if #session_ids == 1 then
+        local worktree = require("fs-monitor.worktree")
+        worktree.create_worktree(session_ids[1], function(success, _) end)
+        return
+      end
+
+      vim.ui.select(session_ids, {
+        prompt = "Select session to create worktree from:",
+      }, function(selected)
+        if selected then
+          local worktree = require("fs-monitor.worktree")
+          worktree.create_worktree(selected, function(success, _) end)
+        end
+      end)
+    else
+      local worktree = require("fs-monitor.worktree")
+      worktree.create_worktree(session_id, function(success, _) end)
+    end
   elseif subcmd == "help" then
     local help = {
       "FSMonitor - File System Monitor Commands",
@@ -163,6 +201,7 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
       "  destroy [session_id] - Destroy session (or all if no ID, no confirmation)",
       "  show [session_id]    - Show diff viewer for a session",
       "  stats [session_id]   - Show session statistics",
+      "  worktree [session_id] - Create a worktree from session changes",
       "  help                 - Show this help message",
     }
     util.notify(table.concat(help, "\n"))
@@ -178,7 +217,7 @@ end, {
 
     -- Complete subcommands
     if num_args == 1 or (num_args == 2 and not cmd_line:match("%s$")) then
-      local subcommands = { "start", "pause", "resume", "stop", "destroy", "show", "stats", "help" }
+      local subcommands = { "start", "pause", "resume", "stop", "destroy", "show", "stats", "worktree", "help" }
       return vim.tbl_filter(function(s)
         return s:find(arg_lead, 1, true) == 1
       end, subcommands)
@@ -194,6 +233,7 @@ end, {
         or subcmd == "destroy"
         or subcmd == "show"
         or subcmd == "stats"
+        or subcmd == "worktree"
       then
         local ok, fs_monitor = pcall(require, "fs-monitor")
         if ok then
