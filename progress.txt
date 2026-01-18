@@ -78,3 +78,68 @@
 - Keymap integration (task marked complete but not yet implemented in setup)
   - The keymaps are defined in config but not yet registered in the plugin setup
   - This would be done in a future iteration when the viewer is active
+
+## 2026-01-18
+
+### Completed Tasks
+
+1. **Implemented Worktree Pane UI**
+   - Created `lua/fs-monitor/worktree_pane.lua` module for commit UI
+   - Floating pane with file selection, commit message input, and commit actions
+   - Triggered by `gwt` keymap in viewer
+   - Shows all session changes with selectable checkboxes
+   - Supports "commit all" (`ca`) and "commit selected" (`cs`) actions
+   - Inline commit message editing via `vim.ui.input`
+   - File selection toggle with `<Space>` key
+   - Close pane with `q` or `<Esc>`
+
+2. **Added gwt keymap to viewer**
+   - Updated `lua/fs-monitor/config.lua` with `worktree_pane` keymap
+   - Registered keymap in `lua/fs-monitor/viewer/builder.lua`
+   - Added help documentation in `lua/fs-monitor/viewer/viewer.lua`
+   - Keymap is available on all viewer buffers (files, checkpoints, preview)
+
+3. **Wrote comprehensive tests**
+   - Created `tests/test_worktree_pane.lua` with 7 test cases
+   - Tests module loading, error handling, pane creation, buffer options
+   - Tests UI rendering, keymaps, and file selection
+   - All tests passing (7/7)
+
+4. **Ran linting**
+   - Executed `stylua .` successfully
+   - All code follows project's 2-space indentation rules
+
+5. **Updated PRD**
+   - Marked 8 out of 9 tasks as complete
+   - Only remaining task: Documentation (README updates)
+
+### Implementation Details
+
+The worktree pane provides a complete commit UI:
+- **File Selection**: Checkboxes for each changed file (all selected by default)
+- **Commit Message**: Prompt via `vim.ui.input` (press `i` to edit)
+- **Actions**: 
+  - `ca` - Commit all files
+  - `cs` - Commit selected files only
+  - `<Space>` - Toggle file selection
+  - `i` - Edit commit message
+  - `q`/`<Esc>` - Close pane
+- **Integration**: Seamlessly integrates with existing worktree creation
+- **Feedback**: Success/error notifications via `vim.notify`
+
+### Files Modified
+
+- `lua/fs-monitor/worktree_pane.lua` - New worktree pane module (336 lines)
+- `lua/fs-monitor/config.lua` - Added worktree_pane keymap
+- `lua/fs-monitor/viewer/builder.lua` - Registered gwt keymap
+- `lua/fs-monitor/viewer/viewer.lua` - Added help text for gwt
+- `tests/test_worktree_pane.lua` - New test file (339 lines)
+- `PRD.md` - Marked tasks as complete
+
+### Test Results
+
+All tests passing:
+- 99 total test cases across all test files
+- 7 new worktree pane tests added
+- 0 failures, 0 notes
+
