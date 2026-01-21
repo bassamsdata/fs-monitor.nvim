@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/bassamsdata/fs-monitor.nvim/compare/v3.0.0...v3.0.1) (2026-01-21)
+
+
+### Bug Fixes
+
+* make debug false by defaul ([051d1b5](https://github.com/bassamsdata/fs-monitor.nvim/commit/051d1b549c8ca16181c006d386a2a8654cce61e2))
+
 ## [3.0.0](https://github.com/bassamsdata/fs-monitor.nvim/compare/v2.0.0...v3.0.0) (2026-01-21)
 
 
