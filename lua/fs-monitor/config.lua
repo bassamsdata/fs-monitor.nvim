@@ -13,7 +13,7 @@ M.default_options = {
     ignore_patterns = {},
     respect_gitignore = true,
     never_ignore = { "TODO.md" },
-    debug = true,
+    debug = false,
     debug_file = nil,
   },
 
