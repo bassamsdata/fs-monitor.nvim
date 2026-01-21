@@ -138,10 +138,6 @@ function M.setup_keymaps(viewer, cfg)
     { km.toggle_preview.key, function() viewer:toggle_preview_only() end, km.toggle_preview.desc },
     { km.toggle_fullscreen.key, function() viewer:toggle_fullscreen() end, km.toggle_fullscreen.desc },
     { km.toggle_word_diff.key, function() viewer:toggle_word_diff() end, km.toggle_word_diff.desc },
-    { km.worktree_pane.key, function()
-      local worktree_pane = require("fs-monitor.worktree_pane")
-      worktree_pane.show_from_viewer(viewer)
-    end, km.worktree_pane.desc },
     -- stylua: ignore end
   }
 
@@ -307,7 +303,7 @@ function M.setup_autocmds(viewer)
   api.nvim_create_autocmd({ "VimResized" }, {
     group = viewer.aug,
     callback = function()
-      local g = viewer:_get_geometry()
+      local g = viewer:get_geometry()
       viewer:_update_win_config(viewer.files_win, {
         relative = "editor",
         row = g.row,

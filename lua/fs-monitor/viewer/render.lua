@@ -4,10 +4,9 @@
 local Render = {}
 
 local api = vim.api
-local constants = require("fs-monitor.viewer.constants")
 local fmt = string.format
 
-local LINE_HIGHLIGHT_PRIORITY = constants.LINE_HIGHLIGHT_PRIORITY
+local LINE_HIGHLIGHT_PRIORITY = 100
 
 Render.__index = Render
 

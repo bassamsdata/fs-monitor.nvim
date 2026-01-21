@@ -76,7 +76,6 @@ M.default_options = {
       view_cumulative      = { key = "a",       desc = "Cumulative"                },
       revert_checkpoint    = { key = "R",       desc = "Revert"                    },
       revert_all           = { key = "X",       desc = "Revert all"                },
-      worktree_pane        = { key = "gwt",     desc = "Open worktree commit pane" },
       create_worktree      = { key = "<leader>ww", desc = "Create worktree from session changes" },
       delete_worktree      = { key = "<leader>wd", desc = "Delete worktree"        },
       -- stylua: ignore end

@@ -864,6 +864,76 @@ function FSMonitor:stop_monitoring_async(watch_id, callback)
   check_completion()
 end
 
+---Refresh cache for files that changed since watch started, then discard those changes
+---@param watch_id string
+---@param callback fun(stats: { refreshed: number, deleted: number, errors: number })
+---@return nil
+function FSMonitor:refresh_changed_files(watch_id, callback)
+  local watch = self.watches[watch_id]
+  if not watch or not watch.enabled then return callback({ refreshed = 0, deleted = 0, errors = 0 }) end
+
+  local start_idx = watch.start_change_idx
+  local changes_to_refresh = {}
+
+  for i = start_idx + 1, #self.changes do
+    table.insert(changes_to_refresh, self.changes[i])
+  end
+
+  if #changes_to_refresh == 0 then return callback({ refreshed = 0, deleted = 0, errors = 0 }) end
+
+  local paths_to_refresh = {}
+  local path_kinds = {}
+
+  for _, change in ipairs(changes_to_refresh) do
+    if not paths_to_refresh[change.path] then
+      paths_to_refresh[change.path] = true
+      path_kinds[change.path] = change.kind
+    end
+  end
+
+  local unique_paths = vim.tbl_keys(paths_to_refresh)
+  local stats = { refreshed = 0, deleted = 0, errors = 0 }
+
+  if #unique_paths == 0 then
+    for i = #self.changes, start_idx + 1, -1 do
+      table.remove(self.changes, i)
+    end
+    return callback(stats)
+  end
+
+  local pending = #unique_paths
+
+  local function done()
+    pending = pending - 1
+    if pending == 0 then
+      for i = #self.changes, start_idx + 1, -1 do
+        table.remove(self.changes, i)
+      end
+      watch.start_change_idx = #self.changes
+      callback(stats)
+    end
+  end
+
+  for _, relative_path in ipairs(unique_paths) do
+    local full_path = vim.fs.joinpath(watch.root_path, relative_path)
+
+    self:_read_file_async(full_path, function(content, err)
+      vim.schedule(function()
+        if err and (err:match("ENOENT") or err:match("no such file")) then
+          lru.remove(watch.cache, relative_path)
+          stats.deleted = stats.deleted + 1
+        elseif err then
+          stats.errors = stats.errors + 1
+        elseif content then
+          lru.set(watch.cache, relative_path, content)
+          stats.refreshed = stats.refreshed + 1
+        end
+        done()
+      end)
+    end)
+  end
+end
+
 ---Stop all active watches
 ---@param callback fun() Called when all watches are stopped
 function FSMonitor:stop_all_async(callback)

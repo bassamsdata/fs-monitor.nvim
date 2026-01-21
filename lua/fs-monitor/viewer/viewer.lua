@@ -67,18 +67,16 @@ function Viewer:get_config()
 end
 
 ---Get geometry based on fullscreen state
----@private
----@return table geometry
-function Viewer:_get_geometry()
+---@return FSMonitor.Diff.Geometry
+function Viewer:get_geometry()
   local geometry = require("fs-monitor.viewer.geometry")
   return geometry.get(self.is_fullscreen)
 end
 
 ---Generate summary from changes
----@private
 ---@param changes FSMonitor.Change[]
 ---@return table summary
-function Viewer:_generate_summary(changes)
+function Viewer:generate_summary(changes)
   local state_module = require("fs-monitor.viewer.state")
   return state_module.generate_summary(changes)
 end
@@ -104,10 +102,9 @@ function Viewer:_update_win_config(win, config)
 end
 
 ---Find which hunk the current line belongs to
----@package
 ---@param current_line number Current cursor line (1-indexed)
 ---@return number|nil hunk_index
-function Viewer:_find_current_hunk(current_line)
+function Viewer:find_current_hunk(current_line)
   for i, range in ipairs(self.hunk_ranges) do
     if current_line >= range.start_line and current_line <= range.end_line then return i end
   end
@@ -115,19 +112,17 @@ function Viewer:_find_current_hunk(current_line)
 end
 
 ---Get cached preview for a file
----@package
 ---@param filepath string
 ---@return table|nil cached_preview
-function Viewer:_get_cached_preview(filepath)
+function Viewer:get_cached_preview(filepath)
   if not self.cache_enabled then return nil end
   return self.preview_cache[filepath]
 end
 
 ---Set cached preview for a file
----@package
 ---@param filepath string
 ---@param cache_data table
-function Viewer:_set_cached_preview(filepath, cache_data)
+function Viewer:set_cached_preview(filepath, cache_data)
   if not self.cache_enabled then return end
 
   if self.preview_cache[filepath] then
@@ -149,16 +144,14 @@ function Viewer:_set_cached_preview(filepath, cache_data)
 end
 
 ---Clear entire preview cache
----@package
-function Viewer:_clear_preview_cache()
+function Viewer:clear_preview_cache()
   self.preview_cache = {}
   self.cache_access_order = {}
 end
 
 ---Remove specific file from cache
----@package
 ---@param filepath string
-function Viewer:_invalidate_cache_for_file(filepath)
+function Viewer:invalidate_cache_for_file(filepath)
   if self.preview_cache[filepath] then
     self.preview_cache[filepath] = nil
     for i, path in ipairs(self.cache_access_order) do
@@ -171,7 +164,7 @@ function Viewer:_invalidate_cache_for_file(filepath)
 end
 
 ---Get first content line of a hunk (skip the @@ header line)
----@package
+---@private
 ---@param range table
 ---@return number
 function Viewer:_get_hunk_content_line(range)
@@ -249,7 +242,7 @@ function Viewer:prev_hunk()
   local cursor = api.nvim_win_get_cursor(self.right_win)
   local current_line = cursor[1]
 
-  local current_hunk_idx = self:_find_current_hunk(current_line)
+  local current_hunk_idx = self:find_current_hunk(current_line)
 
   if current_hunk_idx then
     if current_hunk_idx > 1 then
@@ -277,7 +270,7 @@ function Viewer:prev_hunk()
 end
 
 ---Open file in editor with optional line number
----@package
+---@private
 ---@param filepath string Absolute path to file
 ---@param line? number Optional line number to jump to
 function Viewer:_open_file_at_line(filepath, line)
@@ -371,10 +364,10 @@ function Viewer:apply_checkpoint_filter(checkpoint_idx, mode)
   end
 
   self.filtered_changes = filtered
-  self.summary = self:_generate_summary(filtered)
+  self.summary = self:generate_summary(filtered)
   self.selected_file_idx = 1
 
-  self:_clear_preview_cache()
+  self:clear_preview_cache()
 
   self:_refresh_ui({ selected_checkpoint_idx = checkpoint_idx, show_empty_message = true })
 
@@ -386,10 +379,10 @@ end
 function Viewer:reset_checkpoint_filter()
   self.selected_checkpoint_idx = nil
   self.filtered_changes = self.all_changes
-  self.summary = self:_generate_summary(self.all_changes)
+  self.summary = self:generate_summary(self.all_changes)
   self.selected_file_idx = 1
 
-  self:_clear_preview_cache()
+  self:clear_preview_cache()
 
   self:_refresh_ui()
 
@@ -397,7 +390,7 @@ function Viewer:reset_checkpoint_filter()
 end
 
 ---Generate help lines dynamically from keymaps config
----@package
+---@private
 ---@return string[]
 function Viewer:_generate_help_lines()
   local cfg = self:get_config()
@@ -421,7 +414,6 @@ function Viewer:_generate_help_lines()
     "",
     "## Actions",
     fmt("- **%s**: %s", km.revert_hunk.key, km.revert_hunk.desc),
-    fmt("- **%s**: %s", km.worktree_pane.key, km.worktree_pane.desc),
     "",
     "## Checkpoints",
     fmt("- **%s**: %s (safe - shows cycle changes)", km.view_checkpoint.key, km.view_checkpoint.desc),
@@ -446,7 +438,7 @@ function Viewer:toggle_help()
     return self
   end
 
-  local geom = self:_get_geometry()
+  local geom = self:get_geometry()
 
   self.help_buf = api.nvim_create_buf(false, true)
   set_option("buftype", "nofile", { buf = self.help_buf })
@@ -490,7 +482,7 @@ end
 ---Toggle preview-only mode
 ---@return FSMonitor.Viewer self
 function Viewer:toggle_preview_only()
-  local g = self:_get_geometry()
+  local g = self:get_geometry()
 
   if self.is_preview_only then
     self:_update_win_config(self.files_win, {
@@ -541,7 +533,7 @@ end
 ---@return FSMonitor.Viewer self
 function Viewer:toggle_fullscreen()
   self.is_fullscreen = not self.is_fullscreen
-  local g = self:_get_geometry()
+  local g = self:get_geometry()
 
   if self.is_preview_only then
     local total_width = g.left_w + g.gap + g.right_w
@@ -587,7 +579,7 @@ function Viewer:toggle_word_diff()
 
   self.word_diff = not self.word_diff
 
-  self:_clear_preview_cache()
+  self:clear_preview_cache()
 
   if self.selected_file_idx and #self.summary.files > 0 then self:_update_preview() end
 
@@ -662,7 +654,7 @@ function Viewer:show()
   ui_utils.create_background_window()
 
   local cfg = self:get_config()
-  local geom = self:_get_geometry()
+  local geom = self:get_geometry()
 
   builder.create_buffers(self)
   builder.create_windows(self, geom, cfg)
