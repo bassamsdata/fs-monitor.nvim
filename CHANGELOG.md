@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/bassamsdata/fs-monitor.nvim/compare/v2.0.0...v3.0.0) (2026-01-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **fs-monitor:** Refactor viewer UI and enhance caching for codeocmpanion ([#7](https://github.com/bassamsdata/fs-monitor.nvim/issues/7))
+
+### Code Refactoring
+
+* **fs-monitor:** Refactor viewer UI and enhance caching for codeocmpanion ([#7](https://github.com/bassamsdata/fs-monitor.nvim/issues/7)) ([ba6f81f](https://github.com/bassamsdata/fs-monitor.nvim/commit/ba6f81f6b58a8de05976255fd5337f35d985b1ca))
+
 ## [2.0.0](https://github.com/bassamsdata/fs-monitor.nvim/compare/v1.2.0...v2.0.0) (2026-01-09)
 
 
