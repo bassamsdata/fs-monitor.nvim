@@ -4,10 +4,9 @@
 local Render = {}
 
 local api = vim.api
-local constants = require("fs-monitor.diff.constants")
 local fmt = string.format
 
-local LINE_HIGHLIGHT_PRIORITY = constants.LINE_HIGHLIGHT_PRIORITY
+local LINE_HIGHLIGHT_PRIORITY = 100
 
 Render.__index = Render
 
@@ -179,7 +178,7 @@ function Render:render_diff(hunks, word_diff)
   self:_apply()
 
   if word_diff then
-    require("fs-monitor.diff.word_diff").apply_word_highlights({
+    require("fs-monitor.viewer.word_diff").apply_word_highlights({
       bufnr = self.buf,
       ns_id = self.ns,
       hunks = hunks,

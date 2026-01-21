@@ -8,7 +8,7 @@ local T = new_set({
     pre_case = function()
       h.child_start(child)
       child.lua([[
-        Render = require("fs-monitor.diff.render")
+        Render = require("fs-monitor.viewer.render")
         _G.api = vim.api
       ]])
     end,

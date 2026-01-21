@@ -57,6 +57,7 @@ function M.create_session(opts)
     active_watcher_id = nil,
     started_at = vim.uv.hrtime(),
     metadata = opts.metadata or {},
+    pause_counter = 0,
   }
 
   M._sessions[session_id] = session
@@ -133,7 +134,7 @@ function M.pause(session_id, callback)
     return
   end
 
-  local watch_id = session.active_watcher_id
+  local watch_id = session.active_watcher_id --[[@as string]]
 
   session.monitor:stop_monitoring_async(watch_id, function(new_changes)
     vim.list_extend(session.changes, new_changes)
@@ -174,6 +175,33 @@ function M.resume(session_id, target_path, opts)
   end
 
   return M.start(session_id, target_path, opts)
+end
+
+---Refresh cache with current file state and discard tracked changes
+---@param session_id string
+---@param callback? fun(stats: { refreshed: number, deleted: number, errors: number })
+function M.refresh_baseline(session_id, callback)
+  local session = M._sessions[session_id]
+  if not session then
+    if callback then callback({ refreshed = 0, deleted = 0, errors = 0 }) end
+    return
+  end
+
+  if not session.active_watcher_id then
+    if callback then callback({ refreshed = 0, deleted = 0, errors = 0 }) end
+    return
+  end
+
+  session.monitor:refresh_changed_files(session.active_watcher_id, function(stats)
+    fire_event("FSMonitorBaselineRefreshed", {
+      session_id = session_id,
+      refreshed = stats.refreshed,
+      deleted = stats.deleted,
+      errors = stats.errors,
+    })
+
+    if callback then callback(stats) end
+  end)
 end
 
 ---Stop and finalize session (prompts for confirmation if changes exist)
@@ -273,8 +301,8 @@ function M.show_diff(session_id, opts)
       return
     end
 
-    local diff = require("fs-monitor.diff")
-    diff.show(changes, session.checkpoints, {
+    local viewer = require("fs-monitor.viewer")
+    viewer.show(changes, session.checkpoints, {
       fs_monitor = session.monitor,
       on_revert = function(new_changes, new_checkpoints)
         session.changes = new_changes
@@ -365,16 +393,19 @@ end
 ---@type FSMonitor.Monitor
 M.Monitor = nil
 
----@type FSMonitor.Diff
-M.Diff = nil
+---@type FSMonitor.Viewer
+M.Viewer = nil
 
 setmetatable(M, {
   __index = function(t, k)
     if k == "Monitor" then
       t.Monitor = require("fs-monitor.monitor")
       return t.Monitor
+    elseif k == "Viewer" then
+      t.Viewer = require("fs-monitor.viewer")
+      return t.Viewer
     elseif k == "Diff" then
-      t.Diff = require("fs-monitor.diff")
+      t.Diff = require("fs-monitor.viewer")
       return t.Diff
     end
   end,

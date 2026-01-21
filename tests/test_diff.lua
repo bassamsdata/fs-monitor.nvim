@@ -8,7 +8,7 @@ local T = new_set({
     pre_case = function()
       h.child_start(child)
       child.lua([[
-        Diff = require("fs-monitor.diff")
+        Diff = require("fs-monitor.viewer")
 
         _G.TEST_DIR = vim.fn.tempname()
         vim.fn.mkdir(_G.TEST_DIR, "p")

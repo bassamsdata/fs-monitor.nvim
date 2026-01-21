@@ -1,14 +1,11 @@
----@class FSMonitor.Diff.WordDiff
+---@class FSMonitor.Viewer.WordDiff
 --[[
 This module implements word-level diffing to highlight granular changes within lines.
 Many functions was copied and modified by the excellent inline word diffing implementation in sidekick.nvim by folke.
 ]]
 local M = {}
 
-local constants = require("fs-monitor.diff.constants")
-
-local MAX_LINES_FOR_WORD_DIFF = constants.MAX_LINES_FOR_WORD_DIFF
-local WORD_HIGHLIGHT_PRIORITY = constants.WORD_HIGHLIGHT_PRIORITY
+local WORD_HIGHLIGHT_PRIORITY = 200
 
 ---Split string into words using Vim's keyword detection
 ---@private
@@ -138,13 +135,19 @@ end
 ---@param hunk FSMonitor.Diff.Hunk
 ---@return table|nil word_diffs {line_idx: {old_ranges, new_ranges}} or nil if not applicable
 function M._calculate_word_diffs(hunk)
-  if #hunk.removed_lines ~= #hunk.added_lines then return nil end
-  if #hunk.removed_lines == 0 or #hunk.removed_lines > MAX_LINES_FOR_WORD_DIFF then return nil end
+  local config = require("fs-monitor.config")
+  local max_lines = (config.ui_options.word_diff_max_lines or 5)
+  local line_tolerance = (config.ui_options.word_diff_line_tolerance or 0)
 
+  local line_diff = math.abs(#hunk.removed_lines - #hunk.added_lines)
+  if line_diff > line_tolerance then return nil end
+  if #hunk.removed_lines == 0 or #hunk.removed_lines > max_lines then return nil end
+
+  local min_lines = math.min(#hunk.removed_lines, #hunk.added_lines)
   local word_diffs = {}
   local has_changes = false
 
-  for i = 1, #hunk.removed_lines do
+  for i = 1, min_lines do
     local old_line = hunk.removed_lines[i]
     local new_line = hunk.added_lines[i]
 

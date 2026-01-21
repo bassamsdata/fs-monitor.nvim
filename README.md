@@ -30,9 +30,7 @@ Demo featuring the UI's preview, files, and checkpoints panels. Navigate with Ta
 Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
-{
-  "bassamsdata/fs-monitor.nvim",
-}
+{ "bassamsdata/fs-monitor.nvim", }
 ```
 
 ## CodeCompanion Integration
@@ -45,7 +43,7 @@ require("codecompanion").setup({
     fs_monitor = {
       enabled = true,
       opts = {
-        keymap = "gF",
+        keymap = "gF", -- Will be changed to `gD` in future releases.
       },
     },
   },

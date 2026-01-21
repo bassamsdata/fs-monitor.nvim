@@ -84,6 +84,39 @@
 -- DIFF VIEWER CONFIGURATION
 -- ============================================================================
 
+---@class FSMonitor.Viewer
+---@field original_win number
+---@field files_buf number
+---@field checkpoints_buf number
+---@field right_buf number
+---@field files_win number
+---@field checkpoints_win number
+---@field right_win number
+---@field help_buf number|nil
+---@field help_win number|nil
+---@field ns number
+---@field aug number|nil
+---@field summary table
+---@field checkpoints FSMonitor.Checkpoint[]
+---@field all_changes FSMonitor.Change[]
+---@field filtered_changes FSMonitor.Change[]
+---@field selected_file_idx number
+---@field selected_checkpoint_idx number|nil
+---@field is_preview_only boolean
+---@field is_fullscreen boolean
+---@field fs_monitor FSMonitor.Monitor|nil
+---@field on_revert function|nil
+---@field hunks FSMonitor.Diff.Hunk[]
+---@field hunk_ranges table[]
+---@field line_mappings table
+---@field current_filepath string|nil
+---@field word_diff boolean
+---@field right_keymaps table[]
+---@field preview_cache table
+---@field cache_enabled boolean
+---@field cache_max_files number
+---@field cache_access_order string[]
+
 ---@class FSMonitor.DiffConfig
 ---@field min_height number Minimum window height
 ---@field min_left_width number Minimum left panel width
@@ -100,6 +133,10 @@
 ---@field titles FSMonitor.DiffTitles Window title configuration
 ---@field keymaps FSMonitor.DiffKeymaps Keymap configuration
 ---@field word_diff boolean Whether to enable word diff by default
+---@field word_diff_max_lines number Maximum lines for word diff
+---@field word_diff_line_tolerance number Line tolerance for word diff
+---@field cache_preview boolean Whether to cache preview data
+---@field cache_max_files number Maximum number of files to cache
 
 ---@class FSMonitor.DiffIcons
 ---@field created string Icon for created files
@@ -148,6 +185,8 @@
 ---@field revert_all FSMonitor.DiffKeymapConfig Revert all changes to original
 ---@field toggle_word_diff FSMonitor.DiffKeymapConfig Toggle word-level diff highlighting
 ---@field revert_hunk FSMonitor.DiffKeymapConfig Revert current hunk
+---@field create_worktree FSMonitor.DiffKeymapConfig Create worktree from session changes
+---@field delete_worktree FSMonitor.DiffKeymapConfig Delete worktree
 
 -- ============================================================================
 -- DIFF STATE & UI TYPES
@@ -248,6 +287,7 @@
 ---@field active_watcher_id? string Active watcher ID (nil when paused)
 ---@field started_at number Session start timestamp
 ---@field metadata table User-defined metadata
+---@field pause_counter? number Counter of pause events for the session (optional)
 
 -- ============================================================================
 -- MONITOR CLASS

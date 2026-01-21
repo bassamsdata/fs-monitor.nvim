@@ -8,9 +8,9 @@ local T = new_set({
     pre_case = function()
       h.child_start(child)
       child.lua([[
-        WordDiff = require("fs-monitor.diff.word_diff")
-        Hunks = require("fs-monitor.diff.hunks")
-        Render = require("fs-monitor.diff.render")
+        WordDiff = require("fs-monitor.viewer.word_diff")
+        Hunks = require("fs-monitor.viewer.hunk_calculator")
+        Render = require("fs-monitor.viewer.render")
 
         _G.api = vim.api
       ]])

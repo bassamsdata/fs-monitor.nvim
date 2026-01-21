@@ -7,11 +7,14 @@ local fmt = string.format
 
 local M = {}
 
----@type table<number, string> Maps chat IDs to session IDs
+---@type table<number, string>
 M._chat_sessions = {}
 
----@type table<number, number> Maps buffer numbers to chat IDs
+---@type table<number, number>
 M._bufnr_to_chat = {}
+
+---@type table<number, boolean> Track if first submission happened for each chat
+M._first_submit_done = {}
 
 ---@type number|nil
 M._augroup = nil
@@ -22,12 +25,14 @@ M._initialized = false
 ---@type table
 M._opts = {}
 
+---TODO: get them directly from config.
 ---@type table Default options
 local default_opts = {
   keymap = "gF",
   keymap_description = "Show file system diff (fs-monitor)",
   auto_start = true,
   auto_checkpoint = true,
+  prepopulate_debounce_ms = 500,
   monitor = {
     debounce_ms = 300,
     max_file_size = 1024 * 1024 * 2,
@@ -87,6 +92,42 @@ local function setup_autocommands()
   if M._opts.auto_start then
     vim.api.nvim_create_autocmd("User", {
       group = M._augroup,
+      pattern = "CodeCompanionChatCreated",
+      callback = function(event)
+        local data = event.data or {}
+        local chat_id = data.id
+        local bufnr = data.bufnr
+
+        if not chat_id or not bufnr then return end
+
+        vim.defer_fn(function()
+          if not vim.api.nvim_buf_is_valid(bufnr) then return end
+
+          local fs_monitor = require("fs-monitor")
+          local session_id = M._chat_sessions[chat_id]
+
+          if not session_id then
+            local session = fs_monitor.create_session({
+              id = fmt("codecompanion_chat_%d", chat_id),
+              metadata = { chat_id = chat_id, bufnr = bufnr, source = "codecompanion" },
+            })
+
+            session_id = session.id
+            M._chat_sessions[chat_id] = session_id
+            M._bufnr_to_chat[bufnr] = chat_id
+
+            fs_monitor.start(session_id, vim.fn.getcwd(), {
+              prepopulate = true,
+              recursive = true,
+              on_ready = function(stats) end,
+            })
+          end
+        end, M._opts.prepopulate_debounce_ms or 500)
+      end,
+    })
+
+    vim.api.nvim_create_autocmd("User", {
+      group = M._augroup,
       pattern = "CodeCompanionChatSubmitted",
       callback = function(event)
         local data = event.data or {}
@@ -108,22 +149,33 @@ local function setup_autocommands()
           M._chat_sessions[chat_id] = session_id
           if bufnr then M._bufnr_to_chat[bufnr] = chat_id end
 
-          log:debug("Created session %s for chat %d", session_id, chat_id)
-
           fs_monitor.start(session_id, vim.fn.getcwd(), {
             prepopulate = true,
             recursive = true,
-            on_ready = function(stats)
-              log:debug("Monitoring ready: %d files cached", stats.files_cached)
-            end,
+            on_ready = function(stats) end,
           })
         else
           local session = fs_monitor.get_session(session_id)
-          if session and not session.active_watcher_id then
-            fs_monitor.start(session_id, vim.fn.getcwd(), {
+
+          if session and session.active_watcher_id then
+            if not M._first_submit_done[chat_id] then
+              M._first_submit_done[chat_id] = true
+              fs_monitor.refresh_baseline(session_id, function(stats)
+                if stats.errors > 0 then
+                  log:warn("Baseline refresh completed with %d errors (session %s)", stats.errors, session_id)
+                end
+              end)
+            end
+          elseif session and not session.active_watcher_id then
+            -- Monitoring is paused (after ChatDone), need to resume
+            fs_monitor.resume(session_id, vim.fn.getcwd(), {
               prepopulate = true,
               recursive = true,
+              on_ready = function(stats) end,
             })
+            if not M._first_submit_done[chat_id] then M._first_submit_done[chat_id] = true end
+          else
+            log:debug("Session %s exists but invalid state", session_id)
           end
         end
       end,
@@ -228,11 +280,11 @@ local function setup_autocommands()
 
       local session_id = M._chat_sessions[chat_id]
       if session_id then
-        log:debug("Destroying session %s for closed chat %d", session_id, chat_id)
         require("fs-monitor").destroy(session_id)
         M._chat_sessions[chat_id] = nil
       end
 
+      M._first_submit_done[chat_id] = nil
       if bufnr then M._bufnr_to_chat[bufnr] = nil end
     end,
   })
@@ -285,7 +337,6 @@ return {
     setup_keymaps()
 
     M._initialized = true
-    log:debug("CodeCompanion fs-monitor extension initialized")
   end,
 
   exports = {
