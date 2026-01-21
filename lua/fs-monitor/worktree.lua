@@ -65,7 +65,7 @@ end
 local function get_session_files(changes)
   local files = {}
   for _, change in ipairs(changes) do
-    if change.old_path then table.insert(files, change.old_path) end
+    if change.metadata and change.metadata.old_path then table.insert(files, change.metadata.old_path) end
     table.insert(files, change.path)
   end
   return files
@@ -139,7 +139,17 @@ local function copy_file(src, dst)
   end
 
   local stat = vim.loop.fs_fstat(src_fd)
+  if not stat then
+    vim.loop.fs_close(src_fd)
+    vim.loop.fs_close(dst_fd)
+    return false
+  end
   local content = vim.loop.fs_read(src_fd, stat.size, 0)
+  if not content then
+    vim.loop.fs_close(src_fd)
+    vim.loop.fs_close(dst_fd)
+    return false
+  end
   vim.loop.fs_write(dst_fd, content, 0)
   vim.loop.fs_close(src_fd)
   vim.loop.fs_close(dst_fd)
@@ -166,9 +176,9 @@ local function apply_changes_to_worktree(worktree_path, changes)
     if change.kind == "deleted" then
       -- Delete the file in worktree
       if vim.fn.filereadable(dst_path) == 1 then vim.fn.delete(dst_path) end
-    elseif change.kind == "renamed" and change.old_path then
+    elseif change.kind == "renamed" and change.metadata and change.metadata.old_path then
       -- Handle rename: delete old path, create new path
-      local old_dst_path = worktree_path .. "/" .. change.old_path
+      local old_dst_path = worktree_path .. "/" .. change.metadata.old_path
       if vim.fn.filereadable(old_dst_path) == 1 then vim.fn.delete(old_dst_path) end
       if change.new_content then
         local file = io.open(dst_path, "w")
@@ -204,6 +214,47 @@ local function get_unique_worktree_path(repo_root, base_name)
   end
 
   return worktree_path
+end
+
+---Internal implementation to create the worktree
+---@param session FSMonitor.Session
+---@param repo_root string
+---@param callback fun(success: boolean, worktree_path?: string)
+local function create_worktree_impl(session, repo_root, callback)
+  -- Prompt for worktree name
+  prompt_worktree_name(session.id, function(worktree_name)
+    if not worktree_name or worktree_name == "" then
+      util.notify("Worktree creation cancelled", vim.log.levels.INFO)
+      callback(false)
+      return
+    end
+
+    local worktree_path = get_unique_worktree_path(repo_root, worktree_name)
+    local branch_name = "worktree-" .. worktree_name
+
+    -- Create the worktree using git
+    git_command({ "worktree", "add", "-b", branch_name, worktree_path }, function(success, _, stderr)
+      if not success then
+        util.notify(string.format("Failed to create worktree: %s", stderr or "unknown error"), vim.log.levels.ERROR)
+        callback(false)
+        return
+      end
+
+      -- Apply session changes to the worktree
+      local apply_success = apply_changes_to_worktree(worktree_path, session.changes)
+      if not apply_success then
+        util.notify("Failed to apply changes to worktree", vim.log.levels.ERROR)
+        callback(false)
+        return
+      end
+
+      util.notify(
+        string.format("Worktree created: %s\nBranch: %s\nPath: %s", worktree_name, branch_name, worktree_path),
+        vim.log.levels.INFO
+      )
+      callback(true, worktree_path)
+    end)
+  end)
 end
 
 ---Create a worktree from session changes
@@ -259,47 +310,6 @@ function M.create_worktree(session_id, callback)
         -- Session changes are exclusive, proceed directly
         create_worktree_impl(session, repo_root, callback)
       end
-    end)
-  end)
-end
-
----Internal implementation to create the worktree
----@param session FSMonitor.Session
----@param repo_root string
----@param callback fun(success: boolean, worktree_path?: string)
-local function create_worktree_impl(session, repo_root, callback)
-  -- Prompt for worktree name
-  prompt_worktree_name(session.id, function(worktree_name)
-    if not worktree_name or worktree_name == "" then
-      util.notify("Worktree creation cancelled", vim.log.levels.INFO)
-      callback(false)
-      return
-    end
-
-    local worktree_path = get_unique_worktree_path(repo_root, worktree_name)
-    local branch_name = "worktree-" .. worktree_name
-
-    -- Create the worktree using git
-    git_command({ "worktree", "add", "-b", branch_name, worktree_path }, function(success, _, stderr)
-      if not success then
-        util.notify(string.format("Failed to create worktree: %s", stderr or "unknown error"), vim.log.levels.ERROR)
-        callback(false)
-        return
-      end
-
-      -- Apply session changes to the worktree
-      local apply_success = apply_changes_to_worktree(worktree_path, session.changes)
-      if not apply_success then
-        util.notify("Failed to apply changes to worktree", vim.log.levels.ERROR)
-        callback(false)
-        return
-      end
-
-      util.notify(
-        string.format("Worktree created: %s\nBranch: %s\nPath: %s", worktree_name, branch_name, worktree_path),
-        vim.log.levels.INFO
-      )
-      callback(true, worktree_path)
     end)
   end)
 end
