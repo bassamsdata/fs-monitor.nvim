@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.2](https://github.com/bassamsdata/fs-monitor.nvim/compare/v3.0.1...v3.0.2) (2026-02-14)
+
+
+### Bug Fixes
+
+* **core:** make tracking the CWD adaptive ([3eec2bf](https://github.com/bassamsdata/fs-monitor.nvim/commit/3eec2bf6b8cfb16093a943a1834a8f2b1a879a72))
+
 ## [3.0.1](https://github.com/bassamsdata/fs-monitor.nvim/compare/v3.0.0...v3.0.1) (2026-01-21)
 
 
