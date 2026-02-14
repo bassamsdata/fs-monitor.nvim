@@ -31,7 +31,7 @@ M.default_options = {
     help_zindex = 201,
     word_diff = true,
     word_diff_max_lines = 5,
-    word_diff_line_tolerance = 0,
+    word_diff_line_tolerance = 1,
     cache_preview = true,
     cache_max_files = 100,
 

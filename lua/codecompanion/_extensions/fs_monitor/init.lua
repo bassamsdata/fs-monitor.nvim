@@ -105,24 +105,26 @@ local function setup_autocommands()
 
           local fs_monitor = require("fs-monitor")
           local session_id = M._chat_sessions[chat_id]
+          local cwd = vim.fn.getcwd()
 
           if not session_id then
             local session = fs_monitor.create_session({
               id = fmt("codecompanion_chat_%d", chat_id),
-              metadata = { chat_id = chat_id, bufnr = bufnr, source = "codecompanion" },
+              metadata = { chat_id = chat_id, bufnr = bufnr, source = "codecompanion", cwd = cwd },
             })
 
             session_id = session.id
             M._chat_sessions[chat_id] = session_id
             M._bufnr_to_chat[bufnr] = chat_id
 
-            fs_monitor.start(session_id, vim.fn.getcwd(), {
+            fs_monitor.start(session_id, cwd, {
               prepopulate = true,
               recursive = true,
               on_ready = function(stats) end,
             })
           end
         end, M._opts.prepopulate_debounce_ms or 500)
+
       end,
     })
 
@@ -140,25 +142,42 @@ local function setup_autocommands()
         local session_id = M._chat_sessions[chat_id]
 
         if not session_id then
+          local cwd = vim.fn.getcwd()
           local session = fs_monitor.create_session({
             id = fmt("codecompanion_chat_%d", chat_id),
-            metadata = { chat_id = chat_id, bufnr = bufnr, source = "codecompanion" },
+            metadata = { chat_id = chat_id, bufnr = bufnr, source = "codecompanion", cwd = cwd },
           })
 
           session_id = session.id
           M._chat_sessions[chat_id] = session_id
           if bufnr then M._bufnr_to_chat[bufnr] = chat_id end
 
-          fs_monitor.start(session_id, vim.fn.getcwd(), {
+          fs_monitor.start(session_id, cwd, {
             prepopulate = true,
             recursive = true,
             on_ready = function(stats) end,
           })
         else
           local session = fs_monitor.get_session(session_id)
+          local current_cwd = vim.fn.getcwd()
 
           if session and session.active_watcher_id then
-            if not M._first_submit_done[chat_id] then
+            -- Check if CWD changed
+            local last_cwd = session.metadata.cwd
+            if last_cwd and last_cwd ~= current_cwd then
+              log:info("CWD changed from %s to %s for chat %d, restarting monitoring", last_cwd, current_cwd, chat_id)
+              session.metadata.cwd = current_cwd
+              fs_monitor.stop(session_id, {
+                force = true,
+                callback = function()
+                  fs_monitor.start(session_id, current_cwd, {
+                    prepopulate = true,
+                    recursive = true,
+                    on_ready = function(stats) end,
+                  })
+                end,
+              })
+            elseif not M._first_submit_done[chat_id] then
               M._first_submit_done[chat_id] = true
               fs_monitor.refresh_baseline(session_id, function(stats)
                 if stats.errors > 0 then
@@ -168,7 +187,13 @@ local function setup_autocommands()
             end
           elseif session and not session.active_watcher_id then
             -- Monitoring is paused (after ChatDone), need to resume
-            fs_monitor.resume(session_id, vim.fn.getcwd(), {
+            local last_cwd = session.metadata.cwd
+            if last_cwd and last_cwd ~= current_cwd then
+              log:info("CWD changed from %s to %s for chat %d, resuming in new CWD", last_cwd, current_cwd, chat_id)
+              session.metadata.cwd = current_cwd
+            end
+
+            fs_monitor.resume(session_id, current_cwd, {
               prepopulate = true,
               recursive = true,
               on_ready = function(stats) end,
@@ -178,6 +203,7 @@ local function setup_autocommands()
             log:debug("Session %s exists but invalid state", session_id)
           end
         end
+
       end,
     })
   end
