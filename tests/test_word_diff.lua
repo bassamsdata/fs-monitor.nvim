@@ -223,6 +223,9 @@ T["Word Diff"]["no word highlights when line counts differ in hunk"] = function(
     local bufnr = api.nvim_create_buf(false, true)
     local ns_id = api.nvim_create_namespace("test_word_diff_lines")
 
+    local config = require("fs-monitor.config")
+    config.ui_options = vim.tbl_deep_extend("force", config.ui_options, { word_diff_line_tolerance = 0 })
+
     local hunk = {
       removed_lines = { "local a = 1", "local b = 2" },
       added_lines = { "local c = 3" },
