@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.3](https://github.com/bassamsdata/fs-monitor.nvim/compare/v3.0.2...v3.0.3) (2026-02-23)
+
+
+### Bug Fixes
+
+* **monitor:** clarify start prepopulation without starting monitoring ([068e24c](https://github.com/bassamsdata/fs-monitor.nvim/commit/068e24ce4f6750cd40e7b6dd2a5709593ab37e53))
+
 ## [3.0.2](https://github.com/bassamsdata/fs-monitor.nvim/compare/v3.0.1...v3.0.2) (2026-02-14)
 
 
