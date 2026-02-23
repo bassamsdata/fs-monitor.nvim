@@ -13,9 +13,6 @@ M._chat_sessions = {}
 ---@type table<number, number>
 M._bufnr_to_chat = {}
 
----@type table<number, boolean> Track if first submission happened for each chat
-M._first_submit_done = {}
-
 ---@type number|nil
 M._augroup = nil
 
@@ -85,6 +82,32 @@ local function show_diff(chat)
   })
 end
 
+---Pause monitoring and optionally create a checkpoint
+---@param chat_id number
+local function pause_and_checkpoint(chat_id)
+  local session_id = M._chat_sessions[chat_id]
+  if not session_id then return end
+
+  local fs_monitor = require("fs-monitor")
+  local session = fs_monitor.get_session(session_id)
+  if not session then return end
+
+  fs_monitor.pause(session_id, function(changes)
+    vim.schedule(function()
+      if M._opts.auto_checkpoint and changes and #changes > 0 then
+        local current_session = fs_monitor.get_session(session_id)
+        local cycle = #(current_session and current_session.checkpoints or {}) + 1
+
+        local checkpoint = fs_monitor.create_checkpoint(session_id, fmt("Response #%d", cycle))
+        if checkpoint then
+          checkpoint.cycle = cycle
+          log:debug("Created checkpoint #%d with %d changes", cycle, #changes)
+        end
+      end
+    end)
+  end)
+end
+
 ---Setup autocommands for automatic monitoring
 local function setup_autocommands()
   M._augroup = vim.api.nvim_create_augroup("CodeCompanionFSMonitor", { clear = true })
@@ -117,14 +140,12 @@ local function setup_autocommands()
             M._chat_sessions[chat_id] = session_id
             M._bufnr_to_chat[bufnr] = chat_id
 
-            fs_monitor.start(session_id, cwd, {
-              prepopulate = true,
+            fs_monitor.prepopulate(session_id, cwd, {
               recursive = true,
               on_ready = function(stats) end,
             })
           end
         end, M._opts.prepopulate_debounce_ms or 500)
-
       end,
     })
 
@@ -157,53 +178,45 @@ local function setup_autocommands()
             recursive = true,
             on_ready = function(stats) end,
           })
-        else
-          local session = fs_monitor.get_session(session_id)
-          local current_cwd = vim.fn.getcwd()
-
-          if session and session.active_watcher_id then
-            -- Check if CWD changed
-            local last_cwd = session.metadata.cwd
-            if last_cwd and last_cwd ~= current_cwd then
-              log:info("CWD changed from %s to %s for chat %d, restarting monitoring", last_cwd, current_cwd, chat_id)
-              session.metadata.cwd = current_cwd
-              fs_monitor.stop(session_id, {
-                force = true,
-                callback = function()
-                  fs_monitor.start(session_id, current_cwd, {
-                    prepopulate = true,
-                    recursive = true,
-                    on_ready = function(stats) end,
-                  })
-                end,
-              })
-            elseif not M._first_submit_done[chat_id] then
-              M._first_submit_done[chat_id] = true
-              fs_monitor.refresh_baseline(session_id, function(stats)
-                if stats.errors > 0 then
-                  log:warn("Baseline refresh completed with %d errors (session %s)", stats.errors, session_id)
-                end
-              end)
-            end
-          elseif session and not session.active_watcher_id then
-            -- Monitoring is paused (after ChatDone), need to resume
-            local last_cwd = session.metadata.cwd
-            if last_cwd and last_cwd ~= current_cwd then
-              log:info("CWD changed from %s to %s for chat %d, resuming in new CWD", last_cwd, current_cwd, chat_id)
-              session.metadata.cwd = current_cwd
-            end
-
-            fs_monitor.resume(session_id, current_cwd, {
-              prepopulate = true,
-              recursive = true,
-              on_ready = function(stats) end,
-            })
-            if not M._first_submit_done[chat_id] then M._first_submit_done[chat_id] = true end
-          else
-            log:debug("Session %s exists but invalid state", session_id)
-          end
+          return
         end
 
+        local session = fs_monitor.get_session(session_id)
+        if not session then return end
+
+        local current_cwd = vim.fn.getcwd()
+        local last_cwd = session.metadata.cwd
+
+        if session.active_watcher_id then
+          if last_cwd and last_cwd ~= current_cwd then
+            log:info("CWD changed from %s to %s for chat %d, restarting monitoring", last_cwd, current_cwd, chat_id)
+            session.metadata.cwd = current_cwd
+            fs_monitor.stop(session_id, {
+              force = true,
+              callback = function()
+                fs_monitor.start(session_id, current_cwd, {
+                  prepopulate = true,
+                  recursive = true,
+                  on_ready = function(stats) end,
+                })
+              end,
+            })
+            return
+          end
+
+          fs_monitor.activate_watcher(session_id)
+        else
+          if last_cwd and last_cwd ~= current_cwd then
+            log:info("CWD changed from %s to %s for chat %d, resuming in new CWD", last_cwd, current_cwd, chat_id)
+            session.metadata.cwd = current_cwd
+          end
+
+          fs_monitor.resume(session_id, current_cwd, {
+            prepopulate = true,
+            recursive = true,
+            on_ready = function(stats) end,
+          })
+        end
       end,
     })
   end
@@ -213,31 +226,16 @@ local function setup_autocommands()
     pattern = "CodeCompanionChatDone",
     callback = function(event)
       local data = event.data or {}
-      local chat_id = data.id
+      if data.id then pause_and_checkpoint(data.id) end
+    end,
+  })
 
-      if not chat_id then return end
-
-      local session_id = M._chat_sessions[chat_id]
-      if not session_id then return end
-
-      local fs_monitor = require("fs-monitor")
-      local session = fs_monitor.get_session(session_id)
-      if not session then return end
-
-      fs_monitor.pause(session_id, function(changes)
-        vim.schedule(function()
-          if M._opts.auto_checkpoint and changes and #changes > 0 then
-            local current_session = fs_monitor.get_session(session_id)
-            local cycle = #(current_session and current_session.checkpoints or {}) + 1
-
-            local checkpoint = fs_monitor.create_checkpoint(session_id, fmt("Response #%d", cycle))
-            if checkpoint then
-              checkpoint.cycle = cycle
-              log:debug("Created checkpoint #%d with %d changes", cycle, #changes)
-            end
-          end
-        end)
-      end)
+  vim.api.nvim_create_autocmd("User", {
+    group = M._augroup,
+    pattern = "CodeCompanionChatStopped",
+    callback = function(event)
+      local data = event.data or {}
+      if data.id then pause_and_checkpoint(data.id) end
     end,
   })
 
@@ -310,7 +308,6 @@ local function setup_autocommands()
         M._chat_sessions[chat_id] = nil
       end
 
-      M._first_submit_done[chat_id] = nil
       if bufnr then M._bufnr_to_chat[bufnr] = nil end
     end,
   })

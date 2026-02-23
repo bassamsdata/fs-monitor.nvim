@@ -78,13 +78,11 @@ function M.create_windows(viewer, geom, cfg)
   for opt, val in pairs(win_opts) do
     vim.wo[viewer.files_win][opt] = val
     vim.wo[viewer.checkpoints_win][opt] = val
+    vim.wo[viewer.right_win][opt] = val
   end
-  vim.wo[viewer.right_win].number = false
-  vim.wo[viewer.right_win].relativenumber = false
-  vim.wo[viewer.right_win].wrap = false
   vim.wo[viewer.right_win].cursorline = false
   vim.wo[viewer.right_win].scrollbind = false
-  vim.wo[viewer.right_win].winfixbuf = true
+  vim.b[viewer.right_buf].miniindentscope_disable = true
 
   ui_utils.set_winbar(viewer.files_win, {
     { keys = km.cycle_focus.key, desc = "Tab" },

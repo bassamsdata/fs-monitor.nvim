@@ -649,12 +649,13 @@ end
 ---Start monitoring a file or directory for changes
 ---@param tool_name string
 ---@param target_path string File or directory to watch
----@param opts? table Options: { prepopulate = true, recursive = false, on_ready = function(stats) }
+---@param opts? table Options: { prepopulate = true, recursive = false, prepopulate_only = false, on_ready = function(stats) }
 ---@return string watch_id
 function FSMonitor:start_monitoring(tool_name, target_path, opts)
   opts = opts or {}
   local prepopulate = opts.prepopulate ~= false -- Default true
   local recursive = opts.recursive or false
+  local prepopulate_only = opts.prepopulate_only or false
   local on_ready = opts.on_ready
 
   local normalized_path = vim.fs.normalize(target_path)
@@ -672,7 +673,7 @@ function FSMonitor:start_monitoring(tool_name, target_path, opts)
   end
 
   local watch_id = self:_generate_watch_id(tool_name, root_path)
-  log:debug("Starting monitoring: %s at %s", watch_id, root_path)
+  log:debug("Starting monitoring: %s at %s (prepopulate_only=%s)", watch_id, root_path, tostring(prepopulate_only))
 
   self.watches[watch_id] = {
     handle = nil,
@@ -684,11 +685,14 @@ function FSMonitor:start_monitoring(tool_name, target_path, opts)
     tool_name = tool_name,
     enabled = true,
     start_change_idx = #self.changes,
+    recursive = recursive,
   }
 
   local watch = self.watches[watch_id]
 
   if prepopulate then self:_prepopulate_cache(watch, normalized_path, is_dir, on_ready) end
+
+  if prepopulate_only then return watch_id end
 
   watch.handle = uv.new_fs_event()
   if not watch.handle then
@@ -710,6 +714,34 @@ function FSMonitor:start_monitoring(tool_name, target_path, opts)
 
   log:debug("Monitoring started: %s", watch_id)
   return watch_id
+end
+
+---Activate the FS event watcher on a prepopulate-only watch
+---@param watch_id string
+---@return boolean success
+function FSMonitor:activate_watcher(watch_id)
+  local watch = self.watches[watch_id]
+  if not watch or not watch.enabled then return false end
+  if watch.handle then return true end
+
+  local recursive = watch.recursive or false
+
+  watch.handle = uv.new_fs_event()
+  if not watch.handle then return false end
+
+  local ok = watch.handle:start(watch.root_path, { recursive = recursive }, function(err_event, filename)
+    if err_event then return end
+    if filename then self:_handle_fs_event(watch_id, filename) end
+  end)
+
+  if not ok then
+    if watch.handle and not watch.handle:is_closing() then watch.handle:close() end
+    watch.handle = nil
+    return false
+  end
+
+  log:debug("Watcher activated: %s", watch_id)
+  return true
 end
 
 ---Clean up a watch's resources to prevent memory leaks

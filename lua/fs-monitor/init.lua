@@ -119,6 +119,53 @@ function M.start(session_id, target_path, opts)
   return nil
 end
 
+---Prepopulate cache for a session without starting the FS watcher
+---@param session_id string Session must already exist
+---@param target_path? string Path to scan (default: cwd)
+---@param opts? { recursive?: boolean, on_ready?: fun(stats: FSMonitor.PrepopulateStats) }
+---@return string|nil watch_id
+function M.prepopulate(session_id, target_path, opts)
+  local session = M._sessions[session_id]
+  if not session then return nil end
+
+  target_path = target_path or vim.fn.getcwd()
+  opts = opts or {}
+
+  if opts.recursive == nil then opts.recursive = true end
+
+  local watch_id = session.monitor:start_monitoring("workspace", target_path, {
+    prepopulate = true,
+    recursive = opts.recursive,
+    prepopulate_only = true,
+    on_ready = opts.on_ready,
+  })
+
+  if watch_id and watch_id ~= "" then
+    session.active_watcher_id = watch_id
+    return watch_id
+  end
+
+  return nil
+end
+
+---Activate the FS watcher on a prepopulated session
+---@param session_id string
+---@return boolean success
+function M.activate_watcher(session_id)
+  local session = M._sessions[session_id]
+  if not session or not session.active_watcher_id then return false end
+
+  local ok = session.monitor:activate_watcher(session.active_watcher_id)
+  if ok then
+    fire_event("FSMonitorStarted", {
+      session_id = session_id,
+      watch_id = session.active_watcher_id,
+    })
+  end
+
+  return ok
+end
+
 ---Pause monitoring for a session
 ---@param session_id string
 ---@param callback? fun(changes: FSMonitor.Change[])
