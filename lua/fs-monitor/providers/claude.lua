@@ -172,8 +172,6 @@ function M.install_hooks(project_dir, on_done)
     return on_done(false)
   end
 
-  -- Ensure directories exist (fast local FS op, no async alternative for recursive mkdir)
-  -- TODO: if dirs exists, ensure this doesn't mess with that
   local claude_dir = fs.joinpath(project_dir, ".claude")
   local hooks_dir = fs.joinpath(claude_dir, "hooks")
   vim.fn.mkdir(hooks_dir, "p")
@@ -181,7 +179,6 @@ function M.install_hooks(project_dir, on_done)
   local dest_script = fs.joinpath(hooks_dir, "fs-monitor-hook.sh")
   local settings_path = fs.joinpath(claude_dir, "settings.local.json")
 
-  -- Step 1: Read the hook script source (async)
   read_file_async(hook_script, function(script_data, err_read)
     if err_read or not script_data then
       vim.schedule(function()
@@ -191,7 +188,6 @@ function M.install_hooks(project_dir, on_done)
       return
     end
 
-    -- Step 2: Write the hook script to destination (async, mode 0o755 = 493)
     write_file_async(dest_script, script_data, 493, function(err_write_script)
       if err_write_script then
         vim.schedule(function()
@@ -201,7 +197,6 @@ function M.install_hooks(project_dir, on_done)
         return
       end
 
-      -- Step 3: Read existing settings.local.json (async, may not exist)
       read_file_async(settings_path, function(settings_data)
         local settings = {}
         if settings_data then
@@ -209,8 +204,6 @@ function M.install_hooks(project_dir, on_done)
           if ok_decode and decoded then settings = decoded end
         end
 
-        -- Step 4: Build new settings and write (async)
-        -- TODO: we need to preserve the existing settings
         settings = build_hook_settings(server_addr, settings)
         local json = vim.json.encode(settings)
 
@@ -233,7 +226,7 @@ function M.install_hooks(project_dir, on_done)
   end)
 end
 
----Remove fs-monitor hooks from .claude/settings.local.json (async)
+---Remove fs-monitor hooks from .claude/settings.local.json
 ---@param project_dir? string
 ---@param on_done? fun()
 function M.uninstall_hooks(project_dir, on_done)
@@ -266,7 +259,6 @@ function M.uninstall_hooks(project_dir, on_done)
     end
 
     write_file_async(settings_path, vim.json.encode(settings), nil, function()
-      -- Delete the hook script async
       local hook_script_path = fs.joinpath(project_dir, ".claude", "hooks", "fs-monitor-hook.sh")
       uv.fs_unlink(hook_script_path, function()
         vim.schedule(function()
@@ -297,13 +289,12 @@ function M._on_pre_tool_use(tool_name)
     )
   )
   if not session_id then return "" end
-  if M._watcher_active then return "" end -- already watching
+  if M._watcher_active then return "" end
 
   local fs_monitor = require("fs-monitor")
   local session = fs_monitor.get_session(session_id)
   if not session then return "" end
 
-  -- Activate the watcher that was set up by prepopulate
   if session.active_watcher_id then
     local ok = fs_monitor.activate_watcher(session_id)
     if ok then
@@ -342,8 +333,6 @@ function M._on_file_changed(file_path, tool_name)
   local session = fs_monitor.get_session(session_id)
   if not session then return "" end
 
-  -- Pause the watcher — it has caught all FS changes during this tool execution.
-  -- Changes are collected into the session. Watcher re-starts on next PreToolUse.
   if M._watcher_active then
     fs_monitor.pause(session_id, function(watcher_changes)
       vim.schedule(function()
@@ -353,8 +342,6 @@ function M._on_file_changed(file_path, tool_name)
     end)
   end
 
-  -- For Write|Edit, also register the specific file explicitly (belt-and-suspenders).
-  -- For Bash, the watcher already caught everything — no file_path to register.
   if not file_path or file_path == "" then
     debug_log(fmt("No file_path for tool=%s, watcher handled it", tool_name))
     return ""
@@ -364,8 +351,6 @@ function M._on_file_changed(file_path, tool_name)
   local abs_path = fs.normalize(file_path)
   if not vim.startswith(abs_path, "/") then abs_path = fs.joinpath(cwd, abs_path) end
 
-  -- If watcher was active it already caught this, but _process_file_change
-  -- deduplicates so it's safe to call again for Write|Edit as backup.
   if session.active_watcher_id then
     debug_log(fmt("Processing file change: %s", abs_path))
     session.monitor:_process_file_change(session.active_watcher_id, abs_path)
@@ -422,7 +407,6 @@ function M._on_session_end()
   if not session then return "" end
 
   if M._watcher_active then
-    -- Pause the watcher — this collects all FS changes detected during tool execution
     fs_monitor.pause(session_id, function(watcher_changes)
       vim.schedule(function()
         M._watcher_active = false
@@ -435,7 +419,6 @@ function M._on_session_end()
           debug_log(fmt("Checkpoint '%s' with %d changes", label, #total))
         end
 
-        -- Re-prepopulate cache for next response cycle
         local cwd = session.metadata.cwd or vim.fn.getcwd()
         fs_monitor.prepopulate(session_id, cwd, {
           recursive = true,

@@ -57,7 +57,7 @@ case "$EVENT" in
     TOOL_NAME="${TOOL_NAME:-unknown}"
     log "PreToolUse: tool=$TOOL_NAME"
     TOOL_ESCAPED=$(escape_lua "$TOOL_NAME")
-    send_rpc "v:lua.require('fs-monitor.adapters.claude')._on_pre_tool_use('${TOOL_ESCAPED}')"
+    send_rpc "v:lua.require('fs-monitor.providers.claude')._on_pre_tool_use('${TOOL_ESCAPED}')"
     ;;
   PostToolUse)
     FILE_PATH=$(json_val "$INPUT" "file_path")
@@ -67,18 +67,18 @@ case "$EVENT" in
     if [ -n "$FILE_PATH" ]; then
       FILE_PATH_ESCAPED=$(escape_lua "$FILE_PATH")
       TOOL_ESCAPED=$(escape_lua "$TOOL_NAME")
-      send_rpc "v:lua.require('fs-monitor.adapters.claude')._on_file_changed('${FILE_PATH_ESCAPED}','${TOOL_ESCAPED}')"
+      send_rpc "v:lua.require('fs-monitor.providers.claude')._on_file_changed('${FILE_PATH_ESCAPED}','${TOOL_ESCAPED}')"
     else
       log "No file_path (tool=$TOOL_NAME), watcher catches changes"
     fi
     ;;
   Stop|SessionEnd)
     log "Stop/SessionEnd"
-    send_rpc "v:lua.require('fs-monitor.adapters.claude')._on_session_end()"
+    send_rpc "v:lua.require('fs-monitor.providers.claude')._on_session_end()"
     ;;
   SessionStart)
     log "SessionStart"
-    send_rpc "v:lua.require('fs-monitor.adapters.claude')._on_session_start()"
+    send_rpc "v:lua.require('fs-monitor.providers.claude')._on_session_start()"
     ;;
   *)
     log "Unhandled event: $EVENT"
