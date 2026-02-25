@@ -104,9 +104,11 @@ local function start_sse_stream(port, on_event)
         buffer = buffer:sub(newline_pos + 1)
         if line ~= "" then
           local event = parse_sse_event(line)
-          if event then vim.schedule(function()
-            on_event(event)
-          end) end
+          if event then
+            vim.schedule(function()
+              on_event(event)
+            end)
+          end
         end
       end
     end,
@@ -123,7 +125,7 @@ end
 local function get_plugin_source_path()
   local source = debug.getinfo(1, "S").source:sub(2)
   local plugin_root = vim.fs.normalize(vim.fs.joinpath(vim.fs.dirname(source), "..", "..", ".."))
-  return vim.fs.joinpath(plugin_root, "scripts", "fs-monitor-opencode-plugin.mjs")
+  return vim.fs.joinpath(plugin_root, "scripts", "fs-monitor-opencode-plugin.js")
 end
 
 --- Async read entire file via uv
@@ -187,7 +189,7 @@ function M.install_plugin(project_dir, on_done)
   local plugins_dir = vim.fs.joinpath(project_dir, ".opencode", "plugins")
   vim.fn.mkdir(plugins_dir, "p")
 
-  local dest = vim.fs.joinpath(plugins_dir, "fs-monitor-plugin.mjs")
+  local dest = vim.fs.joinpath(plugins_dir, "fs-monitor-plugin.js")
 
   read_file_async(plugin_src, function(data, err_read)
     if err_read or not data then
@@ -200,7 +202,7 @@ function M.install_plugin(project_dir, on_done)
 
     -- Prepend the server address override
     local patched =
-      fmt('process.env.NVIM_LISTEN_ADDRESS = process.env.NVIM_LISTEN_ADDRESS || "%s";\n%s', server_addr, data)
+        fmt('process.env.NVIM_LISTEN_ADDRESS = process.env.NVIM_LISTEN_ADDRESS || "%s";\n%s', server_addr, data)
 
     write_file_async(dest, patched, function(err_write)
       vim.schedule(function()
@@ -226,7 +228,7 @@ function M.uninstall_plugin(project_dir, on_done)
   local util = require("fs-monitor.utils.util")
   on_done = on_done or function() end
 
-  local dest = vim.fs.joinpath(project_dir, ".opencode", "plugins", "fs-monitor-plugin.mjs")
+  local dest = vim.fs.joinpath(project_dir, ".opencode", "plugins", "fs-monitor-plugin.js")
   uv.fs_unlink(dest, function(err)
     vim.schedule(function()
       if not err then util.notify("OpenCode plugin removed") end
