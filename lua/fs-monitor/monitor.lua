@@ -170,6 +170,43 @@ local function is_binary_content(content)
   return sample:find("\0") ~= nil
 end
 
+---Build stable metadata used to compare file state without reading full content
+---@param stat table|nil
+---@return table|nil
+local function _build_file_stat(stat)
+  if not stat then return nil end
+
+  local mtime_sec = 0
+  local mtime_nsec = 0
+  local mtime = stat.mtime
+  if type(mtime) == "table" then
+    mtime_sec = mtime.sec or mtime.tv_sec or 0
+    mtime_nsec = mtime.nsec or mtime.tv_nsec or 0
+  elseif type(mtime) == "number" then
+    mtime_sec = mtime
+  end
+
+  return {
+    size = stat.size or 0,
+    mtime_sec = mtime_sec,
+    mtime_nsec = mtime_nsec,
+    ino = stat.ino,
+    dev = stat.dev,
+  }
+end
+
+---@param left table|nil
+---@param right table|nil
+---@return boolean
+local function _same_file_stat(left, right)
+  if not left or not right then return false end
+  return left.size == right.size
+    and left.mtime_sec == right.mtime_sec
+    and left.mtime_nsec == right.mtime_nsec
+    and left.ino == right.ino
+    and left.dev == right.dev
+end
+
 ---Read file content asynchronously
 ---@param filepath string
 ---@param callback fun(content: string|nil, err: string|nil, stat?: table)
@@ -190,23 +227,25 @@ function FSMonitor:_read_file_async(filepath, callback)
         return callback(nil, "Failed to get file stats")
       end
 
+      local file_stat = _build_file_stat(stat)
+
       if stat.size > self.max_file_size then
         uv.fs_close(fd)
-        return callback(nil, fmt("File too large: %d bytes", stat.size))
+        return callback(nil, fmt("File too large: %d bytes", stat.size), file_stat)
       end
 
       if stat.size == 0 then
         uv.fs_close(fd)
-        return callback("", nil)
+        return callback("", nil, file_stat)
       end
 
       uv.fs_read(fd, stat.size, 0, function(err_read, data)
         uv.fs_close(fd)
 
-        if err_read then return callback(nil, err_read, nil) end
-        if data and is_binary_content(data) then return callback(nil, "Binary file", nil) end
+        if err_read then return callback(nil, err_read, file_stat) end
+        if data and is_binary_content(data) then return callback(nil, "Binary file", file_stat) end
 
-        callback(data or "", nil, { ino = stat.ino, dev = stat.dev })
+        callback(data or "", nil, file_stat)
       end)
     end)
   end)
@@ -401,6 +440,7 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
 
   local relative_path = self:_get_relative_path(path, watch.root_path)
   local cached_content = lru.get(watch.cache, relative_path)
+  local known_file_stat = watch.file_stats and watch.file_stats[relative_path] or nil
 
   watch.in_progress_reads[path] = (watch.in_progress_reads[path] or 0) + 1
 
@@ -417,8 +457,11 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
         return
       end
 
+      if stat then current_watch.file_stats[relative_path] = stat end
+
       if err and (err:match("ENOENT") or err:match("no such file")) then
-        if cached_content then
+        current_watch.file_stats[relative_path] = nil
+        if cached_content or known_file_stat then
           lru.remove(watch.cache, relative_path)
           self:_register_change({
             path = relative_path,
@@ -428,8 +471,8 @@ function FSMonitor:_process_file_change(watch_id, path, on_complete)
             timestamp = uv.hrtime(),
             tool_name = watch.tool_name,
             metadata = {
-              ino = stat and stat.ino,
-              dev = stat and stat.dev,
+              ino = (stat and stat.ino) or (known_file_stat and known_file_stat.ino),
+              dev = (stat and stat.dev) or (known_file_stat and known_file_stat.dev),
             },
           })
         end
@@ -550,8 +593,9 @@ function FSMonitor:_prepopulate_cache(watch, target_path, is_dir, on_complete)
 
   if not is_dir then
     local relative_path = self:_get_relative_path(target_path, watch.root_path)
-    self:_read_file_async(target_path, function(content, err)
+    self:_read_file_async(target_path, function(content, err, stat)
       vim.schedule(function()
+        if stat then watch.file_stats[relative_path] = stat end
         if not err and content then
           lru.set(watch.cache, relative_path, content)
           stats.files_cached = 1
@@ -614,8 +658,9 @@ function FSMonitor:_prepopulate_cache(watch, target_path, is_dir, on_complete)
 
                 pending = pending + 1
 
-                self:_read_file_async(full_path, function(content, read_err)
+                self:_read_file_async(full_path, function(content, read_err, stat)
                   vim.schedule(function()
+                    if stat then watch.file_stats[relative_path] = stat end
                     if not read_err and content then
                       lru.set(watch.cache, relative_path, content)
                       stats.files_cached = stats.files_cached + 1
@@ -679,6 +724,7 @@ function FSMonitor:start_monitoring(tool_name, target_path, opts)
     handle = nil,
     root_path = root_path,
     cache = lru.create(self.max_cache_bytes),
+    file_stats = {},
     debounce_timer = nil,
     pending_events = {},
     in_progress_reads = {},
@@ -744,6 +790,40 @@ function FSMonitor:activate_watcher(watch_id)
   return true
 end
 
+---Deactivate the FS event watcher without destroying the watch
+---The watch structure, cache, and accumulated changes are preserved.
+---Pending events are flushed so fast tool edits are not dropped.
+---Can be re-activated later via activate_watcher().
+---@param watch_id string
+---@return boolean success
+function FSMonitor:deactivate_watcher(watch_id)
+  local watch = self.watches[watch_id]
+  if not watch then return false end
+
+  local pending_paths = vim.tbl_keys(watch.pending_events or {})
+  watch.pending_events = {}
+
+  if watch.handle then
+    watch.handle:stop()
+    if not watch.handle:is_closing() then watch.handle:close() end
+    watch.handle = nil
+  end
+
+  -- Flush pending events
+  if watch.debounce_timer then
+    watch.debounce_timer:stop()
+    if not watch.debounce_timer:is_closing() then watch.debounce_timer:close() end
+    watch.debounce_timer = nil
+  end
+
+  for _, path in ipairs(pending_paths) do
+    self:_process_file_change(watch_id, path)
+  end
+
+  log:debug("Watcher deactivated: %s", watch_id)
+  return true
+end
+
 ---Clean up a watch's resources to prevent memory leaks
 ---@param watch FSMonitor.Watch
 local function cleanup_watch(watch)
@@ -763,6 +843,7 @@ local function cleanup_watch(watch)
     lru.clear(watch.cache)
     watch.cache = nil
   end
+  watch.file_stats = nil
   watch.pending_events = nil
 end
 
@@ -949,21 +1030,201 @@ function FSMonitor:refresh_changed_files(watch_id, callback)
   for _, relative_path in ipairs(unique_paths) do
     local full_path = vim.fs.joinpath(watch.root_path, relative_path)
 
-    self:_read_file_async(full_path, function(content, err)
+    self:_read_file_async(full_path, function(content, err, file_stat)
       vim.schedule(function()
         if err and (err:match("ENOENT") or err:match("no such file")) then
           lru.remove(watch.cache, relative_path)
+          watch.file_stats[relative_path] = nil
           stats.deleted = stats.deleted + 1
         elseif err then
           stats.errors = stats.errors + 1
         elseif content then
           lru.set(watch.cache, relative_path, content)
+          if file_stat then watch.file_stats[relative_path] = file_stat end
           stats.refreshed = stats.refreshed + 1
         end
         done()
       end)
     end)
   end
+end
+
+---Refresh watch baseline by scanning file metadata and only re-reading changed files
+---@param watch_id string
+---@param callback fun(stats: { refreshed: number, deleted: number, errors: number, files_scanned: number, elapsed_ms: number })
+function FSMonitor:refresh_baseline_from_metadata(watch_id, callback)
+  local watch = self.watches[watch_id]
+  if not watch or not watch.enabled then
+    return callback({ refreshed = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 })
+  end
+
+  local function invoke_callback(result)
+    if vim.in_fast_event() then
+      vim.schedule(function()
+        callback(result)
+      end)
+      return
+    end
+    callback(result)
+  end
+
+  if watch.debounce_timer then
+    watch.debounce_timer:stop()
+    if not watch.debounce_timer:is_closing() then watch.debounce_timer:close() end
+    watch.debounce_timer = nil
+  end
+
+  -- Reset pending event queue because we are establishing a new baseline.
+  watch.pending_events = {}
+
+  local start_time = uv.hrtime()
+  local old_stats = watch.file_stats or {}
+  local next_stats = {}
+  local paths_to_refresh = {}
+  local file_limit = { value = 0 }
+  local stats = { refreshed = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 }
+
+  local pending = 1
+  local finished = false
+
+  local function finalize()
+    if finished then return end
+    finished = true
+
+    for relative_path, _ in pairs(old_stats) do
+      if not next_stats[relative_path] then
+        if lru.get(watch.cache, relative_path) ~= nil then stats.deleted = stats.deleted + 1 end
+        lru.remove(watch.cache, relative_path)
+      end
+    end
+
+    local refresh_paths = vim.tbl_keys(paths_to_refresh)
+    if #refresh_paths == 0 then
+      watch.file_stats = next_stats
+      watch.start_change_idx = #self.changes
+      stats.elapsed_ms = (uv.hrtime() - start_time) / 1000000
+      invoke_callback(stats)
+      return
+    end
+
+    local remaining = #refresh_paths
+    for _, relative_path in ipairs(refresh_paths) do
+      local full_path = paths_to_refresh[relative_path]
+      self:_read_file_async(full_path, function(content, err, file_stat)
+        vim.schedule(function()
+          if file_stat then next_stats[relative_path] = file_stat end
+
+          if err and (err:match("ENOENT") or err:match("no such file")) then
+            if next_stats[relative_path] then next_stats[relative_path] = nil end
+            if lru.get(watch.cache, relative_path) ~= nil then stats.deleted = stats.deleted + 1 end
+            lru.remove(watch.cache, relative_path)
+          elseif err then
+            stats.errors = stats.errors + 1
+            lru.remove(watch.cache, relative_path)
+          else
+            lru.set(watch.cache, relative_path, content or "")
+            stats.refreshed = stats.refreshed + 1
+            _warn_cache_pressure(self, watch)
+          end
+
+          remaining = remaining - 1
+          if remaining == 0 then
+            watch.file_stats = next_stats
+            watch.start_change_idx = #self.changes
+            stats.elapsed_ms = (uv.hrtime() - start_time) / 1000000
+            invoke_callback(stats)
+          end
+        end)
+      end)
+    end
+  end
+
+  local function done()
+    pending = pending - 1
+    if pending == 0 then finalize() end
+  end
+
+  local function scan_dir(dir, depth)
+    if file_limit.value >= self.max_prepopulate_files or depth > self.max_depth then
+      done()
+      return
+    end
+
+    uv.fs_opendir(dir, function(err_open, dir_handle)
+      if err_open or not dir_handle then
+        stats.errors = stats.errors + 1
+        done()
+        return
+      end
+
+      local function read_batch()
+        dir_handle:readdir(function(err_read, entries)
+          if err_read then
+            stats.errors = stats.errors + 1
+            dir_handle:closedir()
+            done()
+            return
+          end
+
+          if not entries then
+            dir_handle:closedir()
+            done()
+            return
+          end
+
+          for _, entry in ipairs(entries) do
+            if file_limit.value >= self.max_prepopulate_files then
+              dir_handle:closedir()
+              done()
+              return
+            end
+
+            local full_path = vim.fs.joinpath(dir, entry.name)
+            if not self:_should_ignore_file(full_path) then
+              if entry.type == "file" then
+                file_limit.value = file_limit.value + 1
+                stats.files_scanned = stats.files_scanned + 1
+
+                local relative_path = self:_get_relative_path(full_path, watch.root_path)
+                pending = pending + 1
+                uv.fs_stat(full_path, function(err_stat, file_info)
+                  vim.schedule(function()
+                    if err_stat or not file_info then
+                      if not (err_stat and (err_stat:match("ENOENT") or err_stat:match("no such file"))) then
+                        stats.errors = stats.errors + 1
+                      end
+                      done()
+                      return
+                    end
+
+                    local file_stat = _build_file_stat(file_info)
+                    if file_stat then
+                      next_stats[relative_path] = file_stat
+                      if not _same_file_stat(old_stats[relative_path], file_stat) then
+                        paths_to_refresh[relative_path] = full_path
+                      end
+                    end
+                    done()
+                  end)
+                end)
+              elseif entry.type == "directory" then
+                pending = pending + 1
+                scan_dir(full_path, depth + 1)
+              end
+            end
+          end
+
+          read_batch()
+        end)
+      end
+
+      read_batch()
+    end)
+  end
+
+  pending = pending + 1
+  scan_dir(watch.root_path, 0)
+  done()
 end
 
 ---Stop all active watches
