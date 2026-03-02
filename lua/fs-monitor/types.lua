@@ -49,6 +49,20 @@
 ---@field directories_scanned number Directories traversed
 ---@field elapsed_ms number Time taken in milliseconds
 
+---@class FSMonitor.FileStat
+---@field size number
+---@field mtime_sec number
+---@field mtime_nsec number
+---@field ino? number
+---@field dev? number
+
+---@class FSMonitor.BaselineRefreshStats
+---@field refreshed number Files re-read into cache
+---@field deleted number Files removed from cache
+---@field errors number Number of errors
+---@field files_scanned number Files scanned by metadata pass
+---@field elapsed_ms number Time taken in milliseconds
+
 -- ============================================================================
 -- WATCH TYPES
 -- ============================================================================
@@ -57,6 +71,7 @@
 ---@field handle uv.uv_fs_event_t|nil FS event handle
 ---@field root_path string Root directory being watched
 ---@field cache table File path -> content cache (LRU)
+---@field file_stats table<string, FSMonitor.FileStat> File metadata snapshot
 ---@field debounce_timer? uv.uv_timer_t Timer for debouncing events
 ---@field pending_events table<string, boolean> Files with pending events to process
 ---@field in_progress_reads table<string, number> Tracks count of in-progress async reads per path
