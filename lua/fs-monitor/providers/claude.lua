@@ -5,7 +5,7 @@
 --- Strategy:
 ---  - PreToolUse:  activate the FS watcher to catch ALL disk changes
 ---  - PostToolUse: (Write|Edit) also register the specific file as backup
----  - Stop:        pause watcher → collect changes → checkpoint → re-prepopulate
+---  - Stop:        deactivate watcher -> checkpoint -> refresh baseline incrementally
 ---
 --- This dual approach catches everything: Write, Edit, AND bash mv/cat/sed.
 
@@ -304,14 +304,25 @@ function M._on_pre_tool_use(tool_name)
       debug_log("WARN: Failed to activate watcher")
     end
   else
-    debug_log("WARN: No active_watcher_id, cannot activate watcher")
+    local cwd = session.metadata.cwd or vim.fn.getcwd()
+    local watch_id = fs_monitor.resume(session_id, cwd, {
+      prepopulate = true,
+      recursive = true,
+      on_ready = function() end,
+    })
+    if watch_id then
+      M._watcher_active = true
+      debug_log(fmt("Recovered watcher via resume for tool: %s", tool_name))
+    else
+      debug_log("WARN: No active_watcher_id, cannot activate watcher")
+    end
   end
 
   return ""
 end
 
----Called on PostToolUse (Write|Edit|Bash): pause watcher + register specific file
----The watcher is paused so user edits between tool uses aren't tracked.
+---Called on PostToolUse (Write|Edit|Bash): deactivate watcher + register specific file
+---The watcher is deactivated so user edits between tool uses aren't tracked.
 ---Changes accumulate in the session; checkpoint is created on Stop.
 ---@param file_path string Absolute or relative file path (may be empty for Bash)
 ---@param tool_name string The Claude tool name (Write, Edit, Bash)
@@ -334,12 +345,9 @@ function M._on_file_changed(file_path, tool_name)
   if not session then return "" end
 
   if M._watcher_active then
-    fs_monitor.pause(session_id, function(watcher_changes)
-      vim.schedule(function()
-        M._watcher_active = false
-        debug_log(fmt("Watcher paused after %s: %d changes collected", tool_name, #watcher_changes))
-      end)
-    end)
+    fs_monitor.deactivate_watcher(session_id)
+    M._watcher_active = false
+    debug_log(fmt("Watcher deactivated after %s", tool_name))
   end
 
   if not file_path or file_path == "" then
@@ -392,7 +400,7 @@ function M._on_file_changed(file_path, tool_name)
   return ""
 end
 
----Called on Stop/SessionEnd: pause watcher, collect changes, checkpoint, re-prepopulate
+---Called on Stop/SessionEnd: checkpoint and refresh baseline incrementally
 ---@return string
 function M._on_session_end()
   local session_id = M._session_id
@@ -407,36 +415,35 @@ function M._on_session_end()
   if not session then return "" end
 
   if M._watcher_active then
-    fs_monitor.pause(session_id, function(watcher_changes)
-      vim.schedule(function()
-        M._watcher_active = false
-        local total = fs_monitor.get_changes(session_id)
-        debug_log(fmt("Watcher paused: %d new changes, %d total", #watcher_changes, #total))
-
-        if #total > 0 then
-          local label = fmt("Response #%d", cycle)
-          fs_monitor.create_checkpoint(session_id, label)
-          debug_log(fmt("Checkpoint '%s' with %d changes", label, #total))
-        end
-
-        local cwd = session.metadata.cwd or vim.fn.getcwd()
-        fs_monitor.prepopulate(session_id, cwd, {
-          recursive = true,
-          on_ready = function(stats)
-            debug_log(fmt("Re-prepopulated: %d files cached", stats.files_cached))
-          end,
-        })
-      end)
-    end)
-  else
-    -- No watcher was active — just checkpoint accumulated manual changes
-    local changes = fs_monitor.get_changes(session_id)
-    if #changes > 0 then
-      local label = fmt("Response #%d", cycle)
-      fs_monitor.create_checkpoint(session_id, label)
-      debug_log(fmt("Checkpoint '%s' with %d changes (no watcher)", label, #changes))
-    end
+    fs_monitor.deactivate_watcher(session_id)
+    M._watcher_active = false
+    debug_log("Watcher deactivated on session end")
   end
+
+  local changes = fs_monitor.get_changes(session_id)
+  local checkpoints = fs_monitor.get_checkpoints(session_id)
+  local last_change_count = 0
+  if #checkpoints > 0 then last_change_count = checkpoints[#checkpoints].change_count or 0 end
+
+  if #changes > last_change_count then
+    local label = fmt("Response #%d", cycle)
+    fs_monitor.create_checkpoint(session_id, label)
+    debug_log(fmt("Checkpoint '%s' with %d total changes", label, #changes))
+  end
+
+  fs_monitor.refresh_baseline(session_id, function(stats)
+    vim.schedule(function()
+      debug_log(
+        fmt(
+          "Baseline refreshed: scanned=%d refreshed=%d deleted=%d errors=%d",
+          stats.files_scanned or 0,
+          stats.refreshed or 0,
+          stats.deleted or 0,
+          stats.errors or 0
+        )
+      )
+    end)
+  end)
 
   return ""
 end

@@ -1,10 +1,14 @@
-// fs-monitor-plugin.mjs
+// fs-monitor-opencode-plugin.js
 // OpenCode plugin for fs-monitor.nvim
 // Logs to /tmp/fs-monitor-opencode.log for debugging.
+//
+// Strategy (mirrors Claude adapter):
+//   tool.execute.before → activate FS watcher (catches mv, sed, etc.)
+//   tool.execute.after  → deactivate watcher + register specific file
+//   session.idle        → checkpoint + incremental baseline refresh
 
 import { appendFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
-import { execSync } from "child_process";
 
 const LOG = "/tmp/fs-monitor-opencode.log";
 
@@ -61,7 +65,6 @@ function findAllNvimSockets() {
 export const FSMonitorPlugin = async ({ $, directory }) => {
     log(`=== Plugin loaded ===`);
     log(`directory: ${directory}`);
-    log(`TMPDIR: ${process.env.TMPDIR || "<not set>"}`);
 
     const sockets = findAllNvimSockets();
     log(`Found ${sockets.length} socket(s): ${sockets.join(", ")}`);
@@ -96,10 +99,6 @@ export const FSMonitorPlugin = async ({ $, directory }) => {
 
     return {
         event: async ({ event }) => {
-            log(
-                `EVENT: type=${event.type} props=${JSON.stringify(event.properties || {}).slice(0, 200)}`,
-            );
-
             if (event.type === "file.edited") {
                 const filePath =
                     event.properties?.file ||
@@ -112,10 +111,6 @@ export const FSMonitorPlugin = async ({ $, directory }) => {
                     await rpc(
                         `v:lua.require('fs-monitor.providers.opencode')._on_file_changed('${escaped}')`,
                     );
-                } else {
-                    log(
-                        `WARN: file.edited no path. keys: ${Object.keys(event.properties || {}).join(", ")}`,
-                    );
                 }
             } else if (event.type === "session.idle") {
                 log(`session.idle`);
@@ -125,29 +120,51 @@ export const FSMonitorPlugin = async ({ $, directory }) => {
             }
         },
 
+        // Before ANY tool: activate the FS watcher
+        "tool.execute.before": async (input, _output) => {
+            const tool = input.tool || "unknown";
+            log(`tool.execute.before: tool="${tool}"`);
+            const escaped = escapeLua(tool);
+            await rpc(
+                `v:lua.require('fs-monitor.providers.opencode')._on_pre_tool_use('${escaped}')`,
+            );
+        },
+
+        // After ANY tool: deactivate watcher + register file for WRITE tools only
         "tool.execute.after": async (input, _output) => {
-            const tool = input.tool || "";
+            const tool = input.tool || "unknown";
+            const WRITE_TOOLS = new Set([
+                "write",
+                "edit",
+                "patch",
+                "multi_edit",
+                "multiedit",
+            ]);
+
+            // Only extract file_path for tools that modify files
+            // read/list/glob/search etc. have file_path but don't change anything
+            const filePath = WRITE_TOOLS.has(tool)
+                ? input.args?.file_path ||
+                input.args?.filePath ||
+                input.args?.path ||
+                ""
+                : "";
+
             log(
-                `tool.execute.after: tool="${tool}" args=${JSON.stringify(input.args || {}).slice(0, 200)}`,
+                `tool.execute.after: tool="${tool}" file="${filePath || "<none>"}"`,
             );
 
-            if (
-                tool === "write" ||
-                tool === "edit" ||
-                tool === "patch" ||
-                tool === "multi_edit"
-            ) {
-                const filePath =
-                    input.args?.file_path ||
-                    input.args?.filePath ||
-                    input.args?.path ||
-                    "";
-                if (filePath) {
-                    const escaped = escapeLua(filePath);
-                    await rpc(
-                        `v:lua.require('fs-monitor.providers.opencode')._on_file_changed('${escaped}')`,
-                    );
-                }
+            const toolEscaped = escapeLua(tool);
+            if (filePath) {
+                const fileEscaped = escapeLua(filePath);
+                await rpc(
+                    `v:lua.require('fs-monitor.providers.opencode')._on_post_tool_use('${fileEscaped}','${toolEscaped}')`,
+                );
+            } else {
+                // For bash, read, etc. — just deactivate watcher, no file registration
+                await rpc(
+                    `v:lua.require('fs-monitor.providers.opencode')._on_post_tool_use('','${toolEscaped}')`,
+                );
             }
         },
     };

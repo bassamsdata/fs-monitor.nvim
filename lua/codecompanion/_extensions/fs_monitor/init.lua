@@ -82,7 +82,7 @@ local function show_diff(chat)
   })
 end
 
----Pause monitoring and optionally create a checkpoint
+---Deactivate monitoring and optionally create a checkpoint
 ---@param chat_id number
 local function pause_and_checkpoint(chat_id)
   local session_id = M._chat_sessions[chat_id]
@@ -92,28 +92,43 @@ local function pause_and_checkpoint(chat_id)
   local session = fs_monitor.get_session(session_id)
   if not session then return end
 
-  fs_monitor.pause(session_id, function(changes)
-    vim.schedule(function()
-      if M._opts.auto_checkpoint and changes and #changes > 0 then
-        local current_session = fs_monitor.get_session(session_id)
-        local cycle = #(current_session and current_session.checkpoints or {}) + 1
+  if session.active_watcher_id then fs_monitor.deactivate_watcher(session_id) end
 
-        local checkpoint = fs_monitor.create_checkpoint(session_id, fmt("Response #%d", cycle))
-        if checkpoint then
-          checkpoint.cycle = cycle
-          log:debug("Created checkpoint #%d with %d changes", cycle, #changes)
-        end
-      end
+  local changes = fs_monitor.get_changes(session_id)
+  local checkpoints = fs_monitor.get_checkpoints(session_id)
+  local last_change_count = 0
+  if #checkpoints > 0 then last_change_count = checkpoints[#checkpoints].change_count or 0 end
+
+  if M._opts.auto_checkpoint and #changes > last_change_count then
+    local cycle = #checkpoints + 1
+    local checkpoint = fs_monitor.create_checkpoint(session_id, fmt("Response #%d", cycle))
+    if checkpoint then
+      checkpoint.cycle = cycle
+      log:debug("Created checkpoint #%d with %d total changes", cycle, #changes)
+    end
+  end
+
+  fs_monitor.refresh_baseline(session_id, function(stats)
+    vim.schedule(function()
+      log:debug(
+        "Refreshed baseline for chat %d (scanned=%d refreshed=%d deleted=%d errors=%d)",
+        chat_id,
+        stats.files_scanned or 0,
+        stats.refreshed or 0,
+        stats.deleted or 0,
+        stats.errors or 0
+      )
     end)
   end)
 end
 
 ---Setup autocommands for automatic monitoring
 local function setup_autocommands()
-  M._augroup = vim.api.nvim_create_augroup("CodeCompanionFSMonitor", { clear = true })
+  local api = vim.api
+  M._augroup = api.nvim_create_augroup("CodeCompanionFSMonitor", { clear = true })
 
   if M._opts.auto_start then
-    vim.api.nvim_create_autocmd("User", {
+    api.nvim_create_autocmd("User", {
       group = M._augroup,
       pattern = "CodeCompanionChatCreated",
       callback = function(event)
@@ -149,7 +164,7 @@ local function setup_autocommands()
       end,
     })
 
-    vim.api.nvim_create_autocmd("User", {
+    api.nvim_create_autocmd("User", {
       group = M._augroup,
       pattern = "CodeCompanionChatSubmitted",
       callback = function(event)
@@ -191,16 +206,13 @@ local function setup_autocommands()
           if last_cwd and last_cwd ~= current_cwd then
             log:info("CWD changed from %s to %s for chat %d, restarting monitoring", last_cwd, current_cwd, chat_id)
             session.metadata.cwd = current_cwd
-            fs_monitor.stop(session_id, {
-              force = true,
-              callback = function()
-                fs_monitor.start(session_id, current_cwd, {
-                  prepopulate = true,
-                  recursive = true,
-                  on_ready = function(stats) end,
-                })
-              end,
-            })
+            fs_monitor.pause(session_id, function()
+              fs_monitor.resume(session_id, current_cwd, {
+                prepopulate = true,
+                recursive = true,
+                on_ready = function(stats) end,
+              })
+            end)
             return
           end
 
@@ -221,7 +233,7 @@ local function setup_autocommands()
     })
   end
 
-  vim.api.nvim_create_autocmd("User", {
+  api.nvim_create_autocmd("User", {
     group = M._augroup,
     pattern = "CodeCompanionChatDone",
     callback = function(event)
@@ -230,7 +242,7 @@ local function setup_autocommands()
     end,
   })
 
-  vim.api.nvim_create_autocmd("User", {
+  api.nvim_create_autocmd("User", {
     group = M._augroup,
     pattern = "CodeCompanionChatStopped",
     callback = function(event)
@@ -239,7 +251,7 @@ local function setup_autocommands()
     end,
   })
 
-  vim.api.nvim_create_autocmd("User", {
+  api.nvim_create_autocmd("User", {
     group = M._augroup,
     pattern = "CodeCompanionToolStarted",
     callback = function(event)
@@ -264,7 +276,7 @@ local function setup_autocommands()
     end,
   })
 
-  vim.api.nvim_create_autocmd("User", {
+  api.nvim_create_autocmd("User", {
     group = M._augroup,
     pattern = "CodeCompanionToolFinished",
     callback = function(event)
@@ -292,7 +304,7 @@ local function setup_autocommands()
     end,
   })
 
-  vim.api.nvim_create_autocmd("User", {
+  api.nvim_create_autocmd("User", {
     group = M._augroup,
     pattern = "CodeCompanionChatClosed",
     callback = function(event)
