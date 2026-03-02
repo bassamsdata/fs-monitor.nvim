@@ -351,6 +351,73 @@ T["Stats"]["get_stats returns stats for valid session"] = function()
   h.eq(true, child.lua_get("_G.has_active"))
 end
 
+T["Stats"]["refresh_baseline updates cache incrementally"] = function()
+  child.lua([[
+    local path_a = vim.fs.joinpath(_G.TEST_DIR, "baseline_a.txt")
+    local path_b = vim.fs.joinpath(_G.TEST_DIR, "baseline_b.txt")
+
+    local f = io.open(path_a, "w")
+    f:write("a1")
+    f:close()
+
+    f = io.open(path_b, "w")
+    f:write("b1")
+    f:close()
+
+    fs_monitor.create_session({ id = "baseline_refresh" })
+    _G.prepopulate_ready = false
+    fs_monitor.prepopulate("baseline_refresh", _G.TEST_DIR, {
+      recursive = true,
+      on_ready = function()
+        _G.prepopulate_ready = true
+      end,
+    })
+  ]])
+
+  child.wait(2000, "_G.prepopulate_ready == true")
+
+  child.lua([[
+    local path_a = vim.fs.joinpath(_G.TEST_DIR, "baseline_a.txt")
+    local path_b = vim.fs.joinpath(_G.TEST_DIR, "baseline_b.txt")
+    local path_c = vim.fs.joinpath(_G.TEST_DIR, "baseline_c.txt")
+
+    local f = io.open(path_a, "w")
+    f:write("a2")
+    f:close()
+
+    os.remove(path_b)
+
+    f = io.open(path_c, "w")
+    f:write("c1")
+    f:close()
+
+    _G.baseline_done = false
+    _G.baseline_stats = nil
+    fs_monitor.refresh_baseline("baseline_refresh", function(stats)
+      _G.baseline_stats = stats
+      _G.baseline_done = true
+    end)
+  ]])
+
+  child.wait(3000, "_G.baseline_done == true")
+
+  child.lua([[
+    local session = fs_monitor.get_session("baseline_refresh")
+    local watch = session.monitor.watches[session.active_watcher_id]
+    local entries = watch.cache.entries
+
+    _G.cache_a = entries["baseline_a.txt"]
+    _G.cache_b = entries["baseline_b.txt"]
+    _G.cache_c = entries["baseline_c.txt"]
+  ]])
+
+  h.eq("a2", child.lua_get("_G.cache_a"))
+  h.eq(vim.NIL, child.lua_get("_G.cache_b"))
+  h.eq("c1", child.lua_get("_G.cache_c"))
+  h.eq(2, child.lua_get("_G.baseline_stats.refreshed"))
+  h.eq(1, child.lua_get("_G.baseline_stats.deleted"))
+end
+
 T["PauseResume"] = new_set()
 
 T["PauseResume"]["pause sets active_watcher_id to nil"] = function()
