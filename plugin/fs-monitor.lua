@@ -19,8 +19,7 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
       require("fs-monitor.providers.claude").start()
       return
     elseif target == "opencode" then
-      local port = args[3] and tonumber(args[3]) or nil
-      require("fs-monitor.providers.opencode").start({ port = port })
+      require("fs-monitor.providers.opencode").start()
       return
     end
 
@@ -220,7 +219,7 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
       "Subcommands:",
       "  start [session_id]     - Start a new monitoring session",
       "  start claude           - Start Claude Code monitoring (installs hooks)",
-      "  start opencode [port]  - Start OpenCode monitoring (auto-discovers or specify port)",
+      "  start opencode          - Start OpenCode monitoring (installs JS plugin)",
       "  pause <session_id>     - Pause monitoring (keeps session alive)",
       "  resume <session_id>    - Resume monitoring existing session",
       "  stop <session_id>      - Stop and destroy session (with confirmation)",
