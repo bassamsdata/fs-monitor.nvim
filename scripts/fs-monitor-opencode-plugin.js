@@ -24,8 +24,12 @@ function log(msg) {
 /** Collect all Neovim server sockets on macOS/Linux */
 function findAllNvimSockets() {
     const sockets = [];
+
+    // NVIM_LISTEN_ADDRESS is preferred (injected by install_plugin) but we
+    // still scan the filesystem so we can discover NEW Neovim instances
+    // after the original one exits.
     const addr = process.env.NVIM_LISTEN_ADDRESS;
-    if (addr) return [addr];
+    if (addr) sockets.push(addr);
 
     // macOS: sockets in $TMPDIR/nvim.*/*/nvim.*.0
     const tmpdir = process.env.TMPDIR || "/tmp";
@@ -59,38 +63,80 @@ function findAllNvimSockets() {
         }
     } catch { }
 
-    return sockets;
+    // Deduplicate while preserving order (preferred addr first)
+    return [...new Set(sockets)];
 }
 
 export const FSMonitorPlugin = async ({ $, directory }) => {
     log(`=== Plugin loaded ===`);
     log(`directory: ${directory}`);
 
-    const sockets = findAllNvimSockets();
+    /** Sockets that have failed RPC — excluded from future refreshes */
+    const knownDeadSockets = new Set();
+
+    /** Clear dead-socket list periodically to allow recovery */
+    setInterval(() => {
+        if (knownDeadSockets.size > 0) {
+            log(`Clearing ${knownDeadSockets.size} dead socket(s) for re-evaluation`);
+            knownDeadSockets.clear();
+        }
+    }, 60_000);
+
+    let sockets = findAllNvimSockets();
     log(`Found ${sockets.length} socket(s): ${sockets.join(", ")}`);
+
+    function refreshSockets() {
+        const next = findAllNvimSockets().filter(
+            (s) => !knownDeadSockets.has(s),
+        );
+        sockets = [...new Set(next)];
+        log(`Socket refresh: found ${sockets.length} live socket(s): ${sockets.join(", ")}`);
+        return sockets;
+    }
 
     /** Try RPC on all sockets until one works */
     async function rpc(expr) {
         if (sockets.length === 0) {
-            const retry = findAllNvimSockets();
+            const retry = refreshSockets();
             if (retry.length === 0) {
                 log(`RPC SKIP: no sockets found`);
                 return;
             }
-            sockets.push(...retry);
         }
 
+        const dead = new Set();
         for (const sock of sockets) {
             try {
                 const result =
                     await $`nvim --server ${sock} --remote-expr ${expr}`.text();
-                log(`RPC OK (${sock}): ${result.trim()}`);
+                log(`RPC OK (${sock})`);
                 return;
             } catch {
-                // This socket is dead, try next
+                dead.add(sock);
             }
         }
-        log(`RPC FAIL: all ${sockets.length} sockets refused connection`);
+
+        if (dead.size > 0) {
+            for (const s of dead) knownDeadSockets.add(s);
+            sockets = sockets.filter((sock) => !dead.has(sock));
+            log(`RPC WARN: removed ${dead.size} dead socket(s), ${knownDeadSockets.size} total blacklisted`);
+        }
+
+        if (sockets.length === 0) {
+            refreshSockets();
+            for (const sock of sockets) {
+                try {
+                    const result =
+                        await $`nvim --server ${sock} --remote-expr ${expr}`.text();
+                    log(`RPC OK (${sock}) after refresh`);
+                    return;
+                } catch {
+                    knownDeadSockets.add(sock);
+                }
+            }
+        }
+
+        log(`RPC FAIL: no working sockets (${knownDeadSockets.size} blacklisted)`);
     }
 
     function escapeLua(s) {
