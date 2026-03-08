@@ -1312,7 +1312,11 @@ T["Stress"]["subdirectory file creation via bash"] = function()
 
   child.lua([[
     claude._on_pre_tool_use("Bash")
+  ]])
 
+  child.wait(200)
+
+  child.lua([[
     local subdir = vim.fs.joinpath(_G.TEST_DIR, "src", "components")
     vim.fn.mkdir(subdir, "p")
 
@@ -1324,14 +1328,14 @@ T["Stress"]["subdirectory file creation via bash"] = function()
     end
   ]])
 
-  child.wait(800)
+  child.wait(1000)
 
   child.lua([[
     claude._on_file_changed("", "Bash")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(600)
 
   child.lua([[
     local session_id = claude.get_session_id()
