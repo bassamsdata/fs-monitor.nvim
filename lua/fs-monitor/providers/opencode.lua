@@ -275,7 +275,25 @@ function M._on_post_tool_use(file_path, tool_name)
 
   -- Also register the specific file as backup (for write/edit tools that report a path)
   if not file_path or file_path == "" then
-    debug_log(fmt("No file_path for tool=%s, watcher handled it", tool_name or "?"))
+    increment_pending_file_events()
+    fs_monitor.reconcile(session_id, {
+      tool_name = tool_name or "opencode",
+      source = "opencode_plugin_reconcile",
+    }, function(stats)
+      vim.schedule(function()
+        debug_log(
+          fmt(
+            "Reconciled empty-path tool=%s created=%d modified=%d deleted=%d errors=%d",
+            tool_name or "?",
+            stats.created or 0,
+            stats.modified or 0,
+            stats.deleted or 0,
+            stats.errors or 0
+          )
+        )
+        decrement_pending_file_events()
+      end)
+    end)
     return ""
   end
 

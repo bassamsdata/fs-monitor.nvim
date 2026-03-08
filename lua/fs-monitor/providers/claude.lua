@@ -41,6 +41,17 @@ M._hooks_installed = false
 ---@type boolean Whether the FS watcher is currently active (tool in progress)
 M._watcher_active = false
 
+---@type number Number of file-change processing operations currently in-flight
+M._pending_file_events = 0
+
+local function increment_pending_file_events()
+  M._pending_file_events = M._pending_file_events + 1
+end
+
+local function decrement_pending_file_events()
+  if M._pending_file_events > 0 then M._pending_file_events = M._pending_file_events - 1 end
+end
+
 -- ============================================================================
 -- HOOK INSTALLATION
 -- ============================================================================
@@ -351,7 +362,25 @@ function M._on_file_changed(file_path, tool_name)
   end
 
   if not file_path or file_path == "" then
-    debug_log(fmt("No file_path for tool=%s, watcher handled it", tool_name))
+    increment_pending_file_events()
+    fs_monitor.reconcile(session_id, {
+      tool_name = tool_name or "claude",
+      source = "claude_hook_reconcile",
+    }, function(stats)
+      vim.schedule(function()
+        debug_log(
+          fmt(
+            "Reconciled empty-path tool=%s created=%d modified=%d deleted=%d errors=%d",
+            tool_name or "?",
+            stats.created or 0,
+            stats.modified or 0,
+            stats.deleted or 0,
+            stats.errors or 0
+          )
+        )
+        decrement_pending_file_events()
+      end)
+    end)
     return ""
   end
 
@@ -361,10 +390,14 @@ function M._on_file_changed(file_path, tool_name)
 
   if session.active_watcher_id then
     debug_log(fmt("Processing file change: %s", abs_path))
-    session.monitor:_process_file_change(session.active_watcher_id, abs_path)
+    increment_pending_file_events()
+    session.monitor:_process_file_change(session.active_watcher_id, abs_path, function()
+      decrement_pending_file_events()
+    end)
   else
     local relative = session.monitor:_get_relative_path(abs_path, cwd)
     debug_log(fmt("Manual read for: %s", relative))
+    increment_pending_file_events()
     session.monitor:_read_file_async(abs_path, function(content, err)
       vim.schedule(function()
         if err then
@@ -380,6 +413,7 @@ function M._on_file_changed(file_path, tool_name)
               metadata = { source = "claude_hook" },
             })
           end
+          decrement_pending_file_events()
           return
         end
 
@@ -393,6 +427,7 @@ function M._on_file_changed(file_path, tool_name)
           metadata = { source = "claude_hook" },
         })
         debug_log(fmt("Registered change. Total: %d", #session.monitor.changes))
+        decrement_pending_file_events()
       end)
     end)
   end
@@ -414,36 +449,60 @@ function M._on_session_end()
   local session = fs_monitor.get_session(session_id)
   if not session then return "" end
 
-  if M._watcher_active then
-    fs_monitor.deactivate_watcher(session_id)
-    M._watcher_active = false
-    debug_log("Watcher deactivated on session end")
-  end
+  local function finish_session_end()
+    if M._watcher_active then
+      fs_monitor.deactivate_watcher(session_id)
+      M._watcher_active = false
+      debug_log("Watcher deactivated on session end")
+    end
 
-  local changes = fs_monitor.get_changes(session_id)
-  local checkpoints = fs_monitor.get_checkpoints(session_id)
-  local last_change_count = 0
-  if #checkpoints > 0 then last_change_count = checkpoints[#checkpoints].change_count or 0 end
+    local changes = fs_monitor.get_changes(session_id)
+    local checkpoints = fs_monitor.get_checkpoints(session_id)
+    local last_change_count = 0
+    if #checkpoints > 0 then last_change_count = checkpoints[#checkpoints].change_count or 0 end
 
-  if #changes > last_change_count then
-    local label = fmt("Response #%d", cycle)
-    fs_monitor.create_checkpoint(session_id, label)
-    debug_log(fmt("Checkpoint '%s' with %d total changes", label, #changes))
-  end
+    if #changes > last_change_count then
+      local label = fmt("Response #%d", cycle)
+      fs_monitor.create_checkpoint(session_id, label)
+      debug_log(fmt("Checkpoint '%s' with %d total changes", label, #changes))
+    end
 
-  fs_monitor.refresh_baseline(session_id, function(stats)
-    vim.schedule(function()
-      debug_log(
-        fmt(
-          "Baseline refreshed: scanned=%d refreshed=%d deleted=%d errors=%d",
-          stats.files_scanned or 0,
-          stats.refreshed or 0,
-          stats.deleted or 0,
-          stats.errors or 0
+    fs_monitor.refresh_baseline(session_id, function(stats)
+      vim.schedule(function()
+        debug_log(
+          fmt(
+            "Baseline refreshed: scanned=%d refreshed=%d deleted=%d errors=%d",
+            stats.files_scanned or 0,
+            stats.refreshed or 0,
+            stats.deleted or 0,
+            stats.errors or 0
+          )
         )
-      )
+      end)
     end)
-  end)
+  end
+
+  if M._pending_file_events <= 0 then
+    finish_session_end()
+    return ""
+  end
+
+  local checks_remaining = 100
+  local function wait_for_pending_events()
+    if M._pending_file_events <= 0 then
+      finish_session_end()
+      return
+    end
+    if checks_remaining <= 0 then
+      debug_log(fmt("WARN: session end timed out with %d pending file events", M._pending_file_events))
+      finish_session_end()
+      return
+    end
+    checks_remaining = checks_remaining - 1
+    vim.defer_fn(wait_for_pending_events, 20)
+  end
+
+  wait_for_pending_events()
 
   return ""
 end
@@ -505,6 +564,7 @@ function M.start(opts)
   M._session_id = session.id
   M._cycle = 0
   M._watcher_active = false
+  M._pending_file_events = 0
 
   debug_log(fmt("Starting session: %s cwd=%s", session.id, cwd))
 
@@ -546,6 +606,7 @@ function M.stop(opts)
   M._session_id = nil
   M._cycle = 0
   M._watcher_active = false
+  M._pending_file_events = 0
 
   -- Uninstall hooks async (fire-and-forget)
   if opts.uninstall_hooks then M.uninstall_hooks() end

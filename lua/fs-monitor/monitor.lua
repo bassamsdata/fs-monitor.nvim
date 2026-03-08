@@ -1236,6 +1236,253 @@ function FSMonitor:refresh_baseline_from_metadata(watch_id, callback)
   done()
 end
 
+---Reconcile the current watch state against cached metadata and register missed changes.
+---@param watch_id string
+---@param opts? { tool_name?: string, source?: string }
+---@param callback fun(stats: FSMonitor.ReconcileStats)
+function FSMonitor:reconcile_with_metadata(watch_id, opts, callback)
+  local watch = self.watches[watch_id]
+  if not watch or not watch.enabled then
+    return callback({ created = 0, modified = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 })
+  end
+
+  opts = opts or {}
+
+  local function invoke_callback(result)
+    if vim.in_fast_event() then
+      vim.schedule(function()
+        callback(result)
+      end)
+      return
+    end
+    callback(result)
+  end
+
+  if watch.debounce_timer then
+    watch.debounce_timer:stop()
+    if not watch.debounce_timer:is_closing() then watch.debounce_timer:close() end
+    watch.debounce_timer = nil
+  end
+
+  watch.pending_events = {}
+
+  local tool_name = opts.tool_name or watch.tool_name
+  local source = opts.source or "reconcile"
+  local start_time = uv.hrtime()
+  local old_stats = watch.file_stats or {}
+  local next_stats = {}
+  local paths_to_refresh = {}
+  local file_limit = { value = 0 }
+  local stats = { created = 0, modified = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 }
+
+  local pending = 1
+  local finished = false
+
+  local function finalize()
+    if finished then return end
+    finished = true
+
+    for relative_path, previous_stat in pairs(old_stats) do
+      if not next_stats[relative_path] then
+        local cached_content = lru.get(watch.cache, relative_path)
+        if cached_content ~= nil or previous_stat then
+          self:_register_change({
+            path = relative_path,
+            kind = "deleted",
+            old_content = cached_content,
+            new_content = nil,
+            timestamp = uv.hrtime(),
+            tool_name = tool_name,
+            metadata = {
+              source = source,
+              ino = previous_stat and previous_stat.ino,
+              dev = previous_stat and previous_stat.dev,
+            },
+          })
+          stats.deleted = stats.deleted + 1
+        end
+        lru.remove(watch.cache, relative_path)
+      end
+    end
+
+    local refresh_paths = vim.tbl_keys(paths_to_refresh)
+    if #refresh_paths == 0 then
+      watch.file_stats = next_stats
+      stats.elapsed_ms = (uv.hrtime() - start_time) / 1000000
+      invoke_callback(stats)
+      return
+    end
+
+    local remaining = #refresh_paths
+    for _, relative_path in ipairs(refresh_paths) do
+      local full_path = paths_to_refresh[relative_path]
+      local cached_content = lru.get(watch.cache, relative_path)
+
+      self:_read_file_async(full_path, function(content, err, file_stat)
+        vim.schedule(function()
+          if file_stat then next_stats[relative_path] = file_stat end
+
+          if err and (err:match("ENOENT") or err:match("no such file")) then
+            local previous_stat = old_stats[relative_path]
+            if next_stats[relative_path] then next_stats[relative_path] = nil end
+            if cached_content ~= nil or previous_stat then
+              self:_register_change({
+                path = relative_path,
+                kind = "deleted",
+                old_content = cached_content,
+                new_content = nil,
+                timestamp = uv.hrtime(),
+                tool_name = tool_name,
+                metadata = {
+                  source = source,
+                  ino = previous_stat and previous_stat.ino,
+                  dev = previous_stat and previous_stat.dev,
+                },
+              })
+              stats.deleted = stats.deleted + 1
+            end
+            lru.remove(watch.cache, relative_path)
+          elseif err then
+            stats.errors = stats.errors + 1
+          else
+            if cached_content == nil then
+              self:_register_change({
+                path = relative_path,
+                kind = "created",
+                old_content = nil,
+                new_content = content,
+                timestamp = uv.hrtime(),
+                tool_name = tool_name,
+                metadata = {
+                  source = source,
+                  size = content and #content or 0,
+                  ino = file_stat and file_stat.ino,
+                  dev = file_stat and file_stat.dev,
+                },
+              })
+              stats.created = stats.created + 1
+            elseif cached_content ~= content then
+              self:_register_change({
+                path = relative_path,
+                kind = "modified",
+                old_content = cached_content,
+                new_content = content,
+                timestamp = uv.hrtime(),
+                tool_name = tool_name,
+                metadata = {
+                  source = source,
+                  old_size = #cached_content,
+                  new_size = content and #content or 0,
+                  ino = file_stat and file_stat.ino,
+                  dev = file_stat and file_stat.dev,
+                },
+              })
+              stats.modified = stats.modified + 1
+            end
+
+            lru.set(watch.cache, relative_path, content or "")
+            _warn_cache_pressure(self, watch)
+          end
+
+          remaining = remaining - 1
+          if remaining == 0 then
+            watch.file_stats = next_stats
+            stats.elapsed_ms = (uv.hrtime() - start_time) / 1000000
+            invoke_callback(stats)
+          end
+        end)
+      end)
+    end
+  end
+
+  local function done()
+    pending = pending - 1
+    if pending == 0 then finalize() end
+  end
+
+  local function scan_dir(dir, depth)
+    if file_limit.value >= self.max_prepopulate_files or depth > self.max_depth then
+      done()
+      return
+    end
+
+    uv.fs_opendir(dir, function(err_open, dir_handle)
+      if err_open or not dir_handle then
+        stats.errors = stats.errors + 1
+        done()
+        return
+      end
+
+      local function read_batch()
+        dir_handle:readdir(function(err_read, entries)
+          if err_read then
+            stats.errors = stats.errors + 1
+            dir_handle:closedir()
+            done()
+            return
+          end
+
+          if not entries then
+            dir_handle:closedir()
+            done()
+            return
+          end
+
+          for _, entry in ipairs(entries) do
+            if file_limit.value >= self.max_prepopulate_files then
+              dir_handle:closedir()
+              done()
+              return
+            end
+
+            local full_path = vim.fs.joinpath(dir, entry.name)
+            if not self:_should_ignore_file(full_path) then
+              if entry.type == "file" then
+                file_limit.value = file_limit.value + 1
+                stats.files_scanned = stats.files_scanned + 1
+
+                local relative_path = self:_get_relative_path(full_path, watch.root_path)
+                pending = pending + 1
+                uv.fs_stat(full_path, function(err_stat, file_info)
+                  vim.schedule(function()
+                    if err_stat or not file_info then
+                      if not (err_stat and (err_stat:match("ENOENT") or err_stat:match("no such file"))) then
+                        stats.errors = stats.errors + 1
+                      end
+                      done()
+                      return
+                    end
+
+                    local file_stat = _build_file_stat(file_info)
+                    if file_stat then
+                      next_stats[relative_path] = file_stat
+                      if not _same_file_stat(old_stats[relative_path], file_stat) then
+                        paths_to_refresh[relative_path] = full_path
+                      end
+                    end
+                    done()
+                  end)
+                end)
+              elseif entry.type == "directory" then
+                pending = pending + 1
+                scan_dir(full_path, depth + 1)
+              end
+            end
+          end
+
+          read_batch()
+        end)
+      end
+
+      read_batch()
+    end)
+  end
+
+  pending = pending + 1
+  scan_dir(watch.root_path, 0)
+  done()
+end
+
 ---Stop all active watches
 ---@param callback fun() Called when all watches are stopped
 function FSMonitor:stop_all_async(callback)

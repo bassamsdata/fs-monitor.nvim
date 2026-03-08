@@ -282,6 +282,27 @@ function M.refresh_baseline(session_id, callback)
   end)
 end
 
+---Reconcile a session against the current filesystem and register missed changes.
+---@param session_id string
+---@param opts? { tool_name?: string, source?: string }
+---@param callback? fun(stats: FSMonitor.ReconcileStats)
+function M.reconcile(session_id, opts, callback)
+  local session = M._sessions[session_id]
+  if not session then
+    if callback then callback({ created = 0, modified = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 }) end
+    return
+  end
+
+  if not session.active_watcher_id then
+    if callback then callback({ created = 0, modified = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 }) end
+    return
+  end
+
+  session.monitor:reconcile_with_metadata(session.active_watcher_id, opts, function(stats)
+    if callback then callback(stats) end
+  end)
+end
+
 ---Stop and finalize session (prompts for confirmation if changes exist)
 ---@param session_id string
 ---@param opts? { force?: boolean, callback?: fun(destroyed: boolean) }

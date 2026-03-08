@@ -63,6 +63,14 @@
 ---@field files_scanned number Files scanned by metadata pass
 ---@field elapsed_ms number Time taken in milliseconds
 
+---@class FSMonitor.ReconcileStats
+---@field created number Files registered as created
+---@field modified number Files registered as modified
+---@field deleted number Files registered as deleted
+---@field errors number Number of errors
+---@field files_scanned number Files scanned by metadata pass
+---@field elapsed_ms number Time taken in milliseconds
+
 -- ============================================================================
 -- WATCH TYPES
 -- ============================================================================
