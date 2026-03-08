@@ -116,6 +116,15 @@ function FSMonitor:_get_relative_path(path, root_path)
     return relative
   end
 
+  -- Symlink mismatch (e.g. macOS /var -> /private/var)
+  local real_file = uv.fs_realpath(normalized_file)
+  local real_root = uv.fs_realpath(normalized_root)
+  if real_file and real_root and real_file:sub(1, #real_root) == real_root then
+    local relative = real_file:sub(#real_root + 1)
+    if relative:sub(1, 1) == "/" or relative:sub(1, 1) == "\\" then relative = relative:sub(2) end
+    return relative
+  end
+
   return normalized_file
 end
 
