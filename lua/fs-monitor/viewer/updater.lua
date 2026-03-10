@@ -81,7 +81,15 @@ function M.update_preview(viewer)
     else
       new_lines = { "(empty file)" }
     end
-  elseif net_operation == "deleted" or net_operation == "transient" then
+  elseif net_operation == "transient" then
+    local transient_content = last_change.old_content or last_change.new_content or first_change.new_content
+    if transient_content then
+      old_lines = vim.split(transient_content, "\n", { plain = true })
+    else
+      old_lines = { "(empty file)" }
+    end
+    new_lines = {}
+  elseif net_operation == "deleted" then
     if first_change.old_content then
       old_lines = vim.split(first_change.old_content, "\n", { plain = true })
     else

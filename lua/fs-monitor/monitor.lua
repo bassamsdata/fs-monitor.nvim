@@ -47,8 +47,9 @@
 local uv = vim.uv
 local lru = require("fs-monitor.utils.lru")
 local gitignore = require("fs-monitor.utils.gitignore")
-local fs = require("fs-monitor.utils.fs")
+local fs_utils = require("fs-monitor.utils.fs")
 local log = require("fs-monitor.log")
+local fs = vim.fs
 
 local fmt = string.format
 
@@ -61,7 +62,7 @@ local DEFAULT_DEBOUNCE_MS = 300
 local DEFAULT_MAX_FILE_SIZE = 1024 * 1024 * 2 -- 2MB
 local DEFAULT_MAX_PREPOPULATE_FILES = 2000
 local DEFAULT_MAX_DEPTH = 6
-local DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 50 -- 50MB total cache limit
+local DEFAULT_MAX_CACHE_BYTES = 1024 * 1024 * 70 -- 70MB total cache limit
 local RENAME_DETECTION_WINDOW = 2000000000 -- 2seconds
 
 ---Create a new FSMonitor instance
@@ -107,8 +108,8 @@ end
 ---@param root_path string
 ---@return string Relative path
 function FSMonitor:_get_relative_path(path, root_path)
-  local normalized_file = vim.fs.normalize(path)
-  local normalized_root = vim.fs.normalize(root_path)
+  local normalized_file = fs.normalize(path)
+  local normalized_root = fs.normalize(root_path)
 
   if normalized_file:sub(1, #normalized_root) == normalized_root then
     local relative = normalized_file:sub(#normalized_root + 1)
@@ -137,7 +138,7 @@ function FSMonitor:_load_gitignore(root_path)
   if self._gitignore_roots[root_path] then return end
   self._gitignore_roots[root_path] = true
 
-  local gitignore_path = vim.fs.joinpath(root_path, ".gitignore")
+  local gitignore_path = fs.joinpath(root_path, ".gitignore")
   local patterns = gitignore.load_patterns(gitignore_path)
 
   for _, parsed in ipairs(patterns) do
@@ -547,7 +548,7 @@ function FSMonitor:_handle_fs_event(watch_id, filename)
   local watch = self.watches[watch_id]
   if not watch or not watch.enabled then return end
 
-  local full_path = vim.fs.joinpath(watch.root_path, filename)
+  local full_path = fs.joinpath(watch.root_path, filename)
 
   watch.pending_events[full_path] = true
 
@@ -657,7 +658,7 @@ function FSMonitor:_prepopulate_cache(watch, target_path, is_dir, on_complete)
               return
             end
 
-            local full_path = vim.fs.joinpath(dir, entry.name)
+            local full_path = fs.joinpath(dir, entry.name)
             is_dir = entry.type == "directory"
 
             if not self:_should_ignore_file(full_path) then
@@ -712,13 +713,13 @@ function FSMonitor:start_monitoring(tool_name, target_path, opts)
   local prepopulate_only = opts.prepopulate_only or false
   local on_ready = opts.on_ready
 
-  local normalized_path = vim.fs.normalize(target_path)
+  local normalized_path = fs.normalize(target_path)
   local stat = uv.fs_stat(normalized_path)
 
   if not stat then return "" end
 
   local is_dir = stat.type == "directory"
-  local root_path = is_dir and normalized_path or vim.fs.dirname(normalized_path)
+  local root_path = is_dir and normalized_path or fs.dirname(normalized_path)
 
   self:_ensure_gitignore_loaded(root_path)
 
@@ -1037,7 +1038,7 @@ function FSMonitor:refresh_changed_files(watch_id, callback)
   end
 
   for _, relative_path in ipairs(unique_paths) do
-    local full_path = vim.fs.joinpath(watch.root_path, relative_path)
+    local full_path = fs.joinpath(watch.root_path, relative_path)
 
     self:_read_file_async(full_path, function(content, err, file_stat)
       vim.schedule(function()
@@ -1188,7 +1189,7 @@ function FSMonitor:refresh_baseline_from_metadata(watch_id, callback)
               return
             end
 
-            local full_path = vim.fs.joinpath(dir, entry.name)
+            local full_path = fs.joinpath(dir, entry.name)
             if not self:_should_ignore_file(full_path) then
               if entry.type == "file" then
                 file_limit.value = file_limit.value + 1
@@ -1435,7 +1436,7 @@ function FSMonitor:reconcile_with_metadata(watch_id, opts, callback)
               return
             end
 
-            local full_path = vim.fs.joinpath(dir, entry.name)
+            local full_path = fs.joinpath(dir, entry.name)
             if not self:_should_ignore_file(full_path) then
               if entry.type == "file" then
                 file_limit.value = file_limit.value + 1
@@ -1615,7 +1616,7 @@ function FSMonitor:tag_changes_in_range(start_time, end_time, tool_name, tool_ar
   -- Extract expected paths from tool args
   local expected_paths = {}
   if tool_args.filepath then
-    local normalized = vim.fs.normalize(tool_args.filepath)
+    local normalized = fs.normalize(tool_args.filepath)
     local relative = self:_get_relative_path(normalized, vim.fn.getcwd())
     table.insert(expected_paths, relative)
   end
@@ -1666,29 +1667,29 @@ function FSMonitor:_revert_changes_list(changes, cwd)
   local dirs_to_check = {}
 
   local function add_parent_to_check(path)
-    local parent = vim.fs.dirname(path)
+    local parent = fs.dirname(path)
     while parent and parent ~= cwd and #parent > #cwd do
       dirs_to_check[parent] = true
-      parent = vim.fs.dirname(parent)
+      parent = fs.dirname(parent)
     end
   end
 
   for i = #changes, 1, -1 do
     local change = changes[i]
-    local absolute_path = vim.fs.joinpath(cwd, change.path)
+    local absolute_path = fs.joinpath(cwd, change.path)
     local ok, err
 
     if change.kind == "created" then
-      ok, err = fs.delete_file(absolute_path)
+      ok, err = fs_utils.delete_file(absolute_path)
       if ok then add_parent_to_check(absolute_path) end
     elseif change.kind == "deleted" then
-      ok, err = fs.write_file(absolute_path, change.old_content)
+      ok, err = fs_utils.write_file(absolute_path, change.old_content)
     elseif change.kind == "modified" then
-      ok, err = fs.write_file(absolute_path, change.old_content)
+      ok, err = fs_utils.write_file(absolute_path, change.old_content)
     elseif change.kind == "renamed" then
       local old_path = change.metadata.old_path
-      local abs_old_path = vim.fs.joinpath(cwd, old_path)
-      ok, err = fs.rename_file(absolute_path, abs_old_path)
+      local abs_old_path = fs.joinpath(cwd, old_path)
+      ok, err = fs_utils.rename_file(absolute_path, abs_old_path)
       if ok then
         add_parent_to_check(absolute_path)
         modified_files_map[change.metadata.old_path] = true
@@ -1710,7 +1711,7 @@ function FSMonitor:_revert_changes_list(changes, cwd)
     return #a > #b
   end)
   for _, dir in ipairs(sorted_dirs) do
-    fs.delete_dir_if_empty(dir)
+    fs_utils.delete_dir_if_empty(dir)
   end
 
   return reverted, errors, vim.tbl_keys(modified_files_map)
@@ -1796,7 +1797,7 @@ end
 function FSMonitor:_refresh_modified_buffers(modified_files, cwd)
   vim.schedule(function()
     for _, filepath in ipairs(modified_files) do
-      local absolute_path = vim.fs.joinpath(cwd, filepath)
+      local absolute_path = fs.joinpath(cwd, filepath)
       for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
         if vim.api.nvim_buf_is_loaded(bufnr) then
           local buf_name = vim.api.nvim_buf_get_name(bufnr)
