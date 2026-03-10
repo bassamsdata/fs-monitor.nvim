@@ -38,7 +38,7 @@ local T = new_set({
         fs_monitor.clear_all(function()
           _G.cleanup_done = true
         end)
-        vim.wait(1000, function() return _G.cleanup_done end)
+        vim.wait(490, function() return _G.cleanup_done end)
         pcall(vim.fn.delete, _G.TEST_DIR, "rf")
       ]])
     end,
@@ -57,7 +57,7 @@ T["Session"]["start creates a session in plugin mode"] = function()
     oc.start()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     _G.session_id = oc._session_id
@@ -75,7 +75,7 @@ T["Session"]["start warns on duplicate session"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     _G.first_session = oc._session_id
@@ -83,7 +83,7 @@ T["Session"]["start warns on duplicate session"] = function()
     _G.second_session = oc._session_id
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Should keep the same session
   h.eq(child.lua_get("_G.first_session"), child.lua_get("_G.second_session"))
@@ -94,7 +94,7 @@ T["Session"]["stop destroys session"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     oc.stop({ keep_plugin = true })
@@ -117,7 +117,7 @@ T["ToolLifecycle"]["pre_tool_use activates watcher"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     _G.watcher_before = oc._watcher_active
@@ -136,7 +136,7 @@ T["ToolLifecycle"]["post_tool_use deactivates watcher"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     oc._on_pre_tool_use("write")
@@ -156,7 +156,7 @@ T["ToolLifecycle"]["watcher stays active with multiple inflight tools"] = functi
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     oc._on_pre_tool_use("read")
@@ -192,7 +192,7 @@ T["WriteTool"]["detects file creation via watcher"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     -- Simulate: tool.execute.before → create file → tool.execute.after
@@ -204,19 +204,19 @@ T["WriteTool"]["detects file creation via watcher"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use(vim.fs.joinpath(_G.TEST_DIR, "created.txt"), "write")
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local session_id = oc._session_id or oc.get_session_id()
@@ -245,7 +245,7 @@ T["WriteTool"]["detects file modification via watcher"] = function()
     oc.start()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_pre_tool_use("edit")
@@ -256,14 +256,14 @@ T["WriteTool"]["detects file modification via watcher"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use(vim.fs.joinpath(_G.TEST_DIR, "existing.txt"), "edit")
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local session_id = oc.get_session_id()
@@ -293,7 +293,7 @@ T["BashTool"]["detects file creation from bash tool"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     -- Simulate: bash tool creates a file (no file_path reported)
@@ -305,14 +305,14 @@ T["BashTool"]["detects file creation from bash tool"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use("", "bash")
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local session_id = oc.get_session_id()
@@ -339,7 +339,7 @@ T["BashTool"]["detects file rename (mv) from bash tool"] = function()
     oc.start()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     -- Simulate: bash tool does "mv before_mv.txt after_mv.txt"
@@ -350,14 +350,14 @@ T["BashTool"]["detects file rename (mv) from bash tool"] = function()
     os.rename(src, dst)
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use("", "bash")
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local session_id = oc.get_session_id()
@@ -392,7 +392,7 @@ T["BashTool"]["detects file deletion from bash tool"] = function()
     oc.start()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     -- Simulate: bash tool does "rm to_delete.txt"
@@ -402,14 +402,14 @@ T["BashTool"]["detects file deletion from bash tool"] = function()
     os.remove(path)
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use("", "bash")
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local session_id = oc.get_session_id()
@@ -437,7 +437,7 @@ T["SessionComplete"]["session_complete creates checkpoint"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     oc._on_pre_tool_use("write")
@@ -447,14 +447,14 @@ T["SessionComplete"]["session_complete creates checkpoint"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use(vim.fs.joinpath(_G.TEST_DIR, "checkpoint_test.txt"), "write")
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local session_id = oc.get_session_id()
@@ -474,7 +474,7 @@ T["SessionComplete"]["session_complete increments cycle counter"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     _G.cycle_before = oc._cycle
@@ -485,14 +485,14 @@ T["SessionComplete"]["session_complete increments cycle counter"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use(vim.fs.joinpath(_G.TEST_DIR, "cycle1.txt"), "write")
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     _G.cycle_after_1 = oc._cycle
@@ -503,14 +503,14 @@ T["SessionComplete"]["session_complete increments cycle counter"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use(vim.fs.joinpath(_G.TEST_DIR, "cycle2.txt"), "write")
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     _G.cycle_after_2 = oc._cycle
@@ -526,7 +526,7 @@ T["SessionComplete"]["session_complete resets inflight tools"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     -- Simulate orphaned inflight count (tool crashed)
@@ -535,7 +535,7 @@ T["SessionComplete"]["session_complete resets inflight tools"] = function()
     _G.inflight_after = oc._inflight_tools
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   h.eq(0, child.lua_get("_G.inflight_after"))
 end
@@ -545,7 +545,7 @@ T["SessionComplete"]["session_complete deactivates watcher"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     oc._on_pre_tool_use("bash")
@@ -555,7 +555,7 @@ T["SessionComplete"]["session_complete deactivates watcher"] = function()
     _G.watcher_after = oc._watcher_active
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   h.eq(true, child.lua_get("_G.watcher_during"))
   h.eq(false, child.lua_get("_G.watcher_after"))
@@ -577,7 +577,7 @@ T["FileChanged"]["on_file_changed registers modification"] = function()
     oc.start()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local path = vim.fs.joinpath(_G.TEST_DIR, "edited.txt")
@@ -588,7 +588,7 @@ T["FileChanged"]["on_file_changed registers modification"] = function()
     oc._on_file_changed(path)
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local session_id = oc.get_session_id()
@@ -617,7 +617,7 @@ T["FileChanged"]["on_file_changed handles deleted file"] = function()
     oc.start()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local path = vim.fs.joinpath(_G.TEST_DIR, "ghost.txt")
@@ -627,7 +627,7 @@ T["FileChanged"]["on_file_changed handles deleted file"] = function()
     oc._on_file_changed(path)
   ]])
 
-  child.wait(1000)
+  child.wait(490)
 
   child.lua([[
     local session_id = oc.get_session_id()
@@ -695,7 +695,7 @@ T["Workflow"]["full multi-tool response cycle"] = function()
     oc.start()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Response 1: write a file
   child.lua([[
@@ -705,14 +705,14 @@ T["Workflow"]["full multi-tool response cycle"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use(vim.fs.joinpath(_G.TEST_DIR, "response1.txt"), "write")
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   -- Response 2: bash mv
   child.lua([[
@@ -723,14 +723,14 @@ T["Workflow"]["full multi-tool response cycle"] = function()
     )
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     oc._on_post_tool_use("", "bash")
     oc._on_session_complete()
   ]])
 
-  child.wait(500)
+  child.wait(250)
 
   child.lua([[
     local session_id = oc.get_session_id()

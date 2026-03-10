@@ -22,7 +22,7 @@ local T = new_set({
         fs_monitor.clear_all(function()
           _G.cleanup_done = true
         end)
-        vim.wait(2000, function() return _G.cleanup_done end)
+        vim.wait(1400, function() return _G.cleanup_done end)
         pcall(vim.fn.delete, _G.TEST_DIR, "rf")
       ]])
     end,
@@ -50,7 +50,7 @@ T["Monitor"]["can start and stop a session"] = function()
     end)
   ]])
 
-  child.wait(500, "_G.stopped == true")
+  child.wait(350, "_G.stopped == true")
   local changes = child.lua_get("_G.changes")
   h.eq({}, changes)
 end
@@ -60,7 +60,7 @@ T["Monitor"]["detects file creation"] = function()
     fs_monitor.create_session({ id = "test_creation" })
     fs_monitor.start("test_creation", _G.TEST_DIR)
 
-    vim.wait(100)
+    vim.wait(70)
 
     -- Create a file
     local f = io.open(vim.fs.joinpath(_G.TEST_DIR, "hello.txt"), "w")
@@ -68,7 +68,7 @@ T["Monitor"]["detects file creation"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(350)
 
   child.lua([[
     _G.stopped = false
@@ -78,7 +78,7 @@ T["Monitor"]["detects file creation"] = function()
     end)
   ]])
 
-  child.wait(1000, "_G.stopped == true")
+  child.wait(700, "_G.stopped == true")
   local changes = child.lua_get("_G.changes")
 
   h.eq(1, #changes)
@@ -98,14 +98,14 @@ T["Monitor"]["detects file modification"] = function()
     fs_monitor.start("test_mod", _G.TEST_DIR)
 
     -- Wait for prepopulate
-    vim.wait(200)
+    vim.wait(140)
 
     f = io.open(path, "w")
     f:write("modified")
     f:close()
   ]])
 
-  child.wait(1000)
+  child.wait(700)
 
   child.lua([[
     _G.stopped = false
@@ -115,7 +115,7 @@ T["Monitor"]["detects file modification"] = function()
     end)
   ]])
 
-  child.wait(1000, "_G.stopped == true")
+  child.wait(700, "_G.stopped == true")
   local changes = child.lua_get("_G.changes")
 
   h.eq(1, #changes)
@@ -137,12 +137,12 @@ T["Monitor"]["detects file deletion"] = function()
     fs_monitor.start("test_del", _G.TEST_DIR)
 
     -- Wait for prepopulate
-    vim.wait(200)
+    vim.wait(140)
 
     os.remove(path)
   ]])
 
-  child.wait(500)
+  child.wait(350)
 
   child.lua([[
     _G.stopped = false
@@ -152,7 +152,7 @@ T["Monitor"]["detects file deletion"] = function()
     end)
   ]])
 
-  child.wait(500, "_G.stopped == true")
+  child.wait(350, "_G.stopped == true")
   local changes = child.lua_get("_G.changes")
 
   h.eq(1, #changes)
@@ -285,7 +285,7 @@ T["Checkpoint"]["creates checkpoint for session"] = function()
   child.lua([[
     fs_monitor.create_session({ id = "cp_test" })
     fs_monitor.start("cp_test", _G.TEST_DIR)
-    vim.wait(100)
+    vim.wait(70)
 
     local checkpoint = fs_monitor.create_checkpoint("cp_test", "Test checkpoint")
     _G.checkpoint = checkpoint
@@ -301,7 +301,7 @@ T["Checkpoint"]["get_checkpoints returns checkpoints"] = function()
   child.lua([[
     fs_monitor.create_session({ id = "cp_list" })
     fs_monitor.start("cp_list", _G.TEST_DIR)
-    vim.wait(100)
+    vim.wait(70)
 
     fs_monitor.create_checkpoint("cp_list", "First")
     fs_monitor.create_checkpoint("cp_list", "Second")
@@ -331,7 +331,7 @@ T["Stats"]["get_stats returns stats for valid session"] = function()
   child.lua([[
     fs_monitor.create_session({ id = "stats_test" })
     fs_monitor.start("stats_test", _G.TEST_DIR)
-    vim.wait(100)
+    vim.wait(70)
 
     -- Create a file to generate a change
     local f = io.open(vim.fs.joinpath(_G.TEST_DIR, "stat_file.txt"), "w")
@@ -339,7 +339,7 @@ T["Stats"]["get_stats returns stats for valid session"] = function()
     f:close()
   ]])
 
-  child.wait(1000)
+  child.wait(700)
 
   child.lua([[
     _G.stats = fs_monitor.get_stats("stats_test")
@@ -374,7 +374,7 @@ T["Stats"]["refresh_baseline updates cache incrementally"] = function()
     })
   ]])
 
-  child.wait(2000, "_G.prepopulate_ready == true")
+  child.wait(1400, "_G.prepopulate_ready == true")
 
   child.lua([[
     local path_a = vim.fs.joinpath(_G.TEST_DIR, "baseline_a.txt")
@@ -399,7 +399,7 @@ T["Stats"]["refresh_baseline updates cache incrementally"] = function()
     end)
   ]])
 
-  child.wait(3000, "_G.baseline_done == true")
+  child.wait(2100, "_G.baseline_done == true")
 
   child.lua([[
     local session = fs_monitor.get_session("baseline_refresh")
@@ -434,7 +434,7 @@ T["PauseResume"]["pause sets active_watcher_id to nil"] = function()
     end)
   ]])
 
-  child.wait(200, "_G.paused == true")
+  child.wait(140, "_G.paused == true")
 
   child.lua([[
     local session = fs_monitor.get_session("pause_test")
@@ -456,7 +456,7 @@ T["PauseResume"]["resume restores active_watcher_id"] = function()
     end)
   ]])
 
-  child.wait(200, "_G.paused == true")
+  child.wait(140, "_G.paused == true")
 
   child.lua([[
     local session = fs_monitor.get_session("resume_test")
@@ -502,7 +502,7 @@ T["PauseResume"]["pause-resume-pause cycle preserves changes"] = function()
   child.lua([[
     fs_monitor.create_session({ id = "cycle_test" })
     fs_monitor.start("cycle_test", _G.TEST_DIR)
-    vim.wait(100)
+    vim.wait(70)
 
     -- Create file during first monitoring
     local f = io.open(vim.fs.joinpath(_G.TEST_DIR, "cycle1.txt"), "w")
@@ -510,7 +510,7 @@ T["PauseResume"]["pause-resume-pause cycle preserves changes"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(350)
 
   child.lua([[
     _G.paused1 = false
@@ -520,11 +520,11 @@ T["PauseResume"]["pause-resume-pause cycle preserves changes"] = function()
     end)
   ]])
 
-  child.wait(500, "_G.paused1 == true")
+  child.wait(350, "_G.paused1 == true")
 
   child.lua([[
     fs_monitor.resume("cycle_test", _G.TEST_DIR)
-    vim.wait(100)
+    vim.wait(70)
 
     -- Create file during second monitoring
     local f = io.open(vim.fs.joinpath(_G.TEST_DIR, "cycle2.txt"), "w")
@@ -532,7 +532,7 @@ T["PauseResume"]["pause-resume-pause cycle preserves changes"] = function()
     f:close()
   ]])
 
-  child.wait(1000)
+  child.wait(700)
 
   child.lua([[
     _G.paused2 = false
@@ -542,7 +542,7 @@ T["PauseResume"]["pause-resume-pause cycle preserves changes"] = function()
     end)
   ]])
 
-  child.wait(500, "_G.paused2 == true")
+  child.wait(350, "_G.paused2 == true")
 
   child.lua([[
     local all_changes = fs_monitor.get_changes("cycle_test")
@@ -570,7 +570,7 @@ T["Stop"]["stop with force destroys session"] = function()
     })
   ]])
 
-  child.wait(500, "_G.stopped == true")
+  child.wait(350, "_G.stopped == true")
 
   child.lua([[
     _G.exists_after = fs_monitor.get_session("force_stop") ~= nil
@@ -583,7 +583,7 @@ T["Stop"]["stop without changes destroys immediately"] = function()
   child.lua([[
     fs_monitor.create_session({ id = "no_changes_stop" })
     fs_monitor.start("no_changes_stop", _G.TEST_DIR)
-    vim.wait(100)
+    vim.wait(70)
 
     _G.stopped = false
     fs_monitor.stop("no_changes_stop", {
@@ -593,7 +593,7 @@ T["Stop"]["stop without changes destroys immediately"] = function()
     })
   ]])
 
-  child.wait(500, "_G.stopped == true")
+  child.wait(350, "_G.stopped == true")
 
   child.lua([[
     _G.exists_after = fs_monitor.get_session("no_changes_stop") ~= nil

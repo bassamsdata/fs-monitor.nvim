@@ -42,7 +42,7 @@ local T = new_set({
         fs_monitor.clear_all(function()
           _G.cleanup_done = true
         end)
-        vim.wait(1000, function() return _G.cleanup_done end)
+        vim.wait(200, function() return _G.cleanup_done end)
         pcall(vim.fn.delete, _G.TEST_DIR, "rf")
       ]])
     end,
@@ -61,7 +61,7 @@ T["Session"]["start creates a session"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     _G.session_id = claude._session_id
@@ -81,7 +81,7 @@ T["Session"]["start warns on duplicate session"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     _G.first_session = claude._session_id
@@ -89,7 +89,7 @@ T["Session"]["start warns on duplicate session"] = function()
     _G.second_session = claude._session_id
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   h.eq(child.lua_get("_G.first_session"), child.lua_get("_G.second_session"))
 end
@@ -99,7 +99,7 @@ T["Session"]["stop destroys session"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude.stop({ uninstall_hooks = false })
@@ -116,7 +116,7 @@ T["Session"]["stop resets cycle counter and watcher state"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._cycle = 5
@@ -135,7 +135,7 @@ T["Session"]["get_session_id returns active id"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     _G.getter_id = claude.get_session_id()
@@ -156,7 +156,7 @@ T["PreToolUse"]["activates watcher on first tool"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     _G.watcher_before = claude._watcher_active
@@ -173,7 +173,7 @@ T["PreToolUse"]["second pre_tool_use is a no-op when watcher already active"] = 
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_pre_tool_use("Write")
@@ -212,7 +212,7 @@ T["PostToolUse"]["deactivates watcher and registers file change"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_pre_tool_use("Write")
@@ -224,14 +224,14 @@ T["PostToolUse"]["deactivates watcher and registers file change"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "written.txt"), "Write")
     _G.watcher_after = claude._watcher_active
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -253,7 +253,7 @@ T["PostToolUse"]["handles empty file_path (Bash tool)"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_pre_tool_use("Bash")
@@ -285,7 +285,7 @@ T["SessionEnd"]["creates checkpoint on session end"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_pre_tool_use("Write")
@@ -295,19 +295,19 @@ T["SessionEnd"]["creates checkpoint on session end"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "checkpoint_test.txt"), "Write")
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -327,7 +327,7 @@ T["SessionEnd"]["increments cycle counter"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     _G.cycle_before = claude._cycle
@@ -338,14 +338,14 @@ T["SessionEnd"]["increments cycle counter"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "cycle1.txt"), "Write")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     _G.cycle_after_1 = claude._cycle
@@ -356,14 +356,14 @@ T["SessionEnd"]["increments cycle counter"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "cycle2.txt"), "Write")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     _G.cycle_after_2 = claude._cycle
@@ -379,7 +379,7 @@ T["SessionEnd"]["deactivates watcher if still active"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_pre_tool_use("Bash")
@@ -388,7 +388,7 @@ T["SessionEnd"]["deactivates watcher if still active"] = function()
     _G.watcher_after = claude._watcher_active
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   h.eq(true, child.lua_get("_G.watcher_during"))
   h.eq(false, child.lua_get("_G.watcher_after"))
@@ -407,7 +407,7 @@ T["SessionEnd"]["skips checkpoint when no new changes since last"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- First end with a change -> checkpoint
   child.lua([[
@@ -417,21 +417,21 @@ T["SessionEnd"]["skips checkpoint when no new changes since last"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "once.txt"), "Write")
     claude._on_session_end()
   ]])
 
-  child.wait(800)
+  child.wait(390)
 
   -- Second end with NO new changes -> no additional checkpoint
   child.lua([[
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -453,7 +453,7 @@ T["SessionStart"]["noop when session already exists"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     _G.session_before = claude._session_id
@@ -470,7 +470,7 @@ T["SessionStart"]["auto-starts when vim.g.fs_monitor_claude_auto is set"] = func
     claude._on_session_start()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     _G.session_id = claude._session_id
@@ -505,7 +505,7 @@ T["WriteTool"]["detects file creation via watcher"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_pre_tool_use("Write")
@@ -516,19 +516,19 @@ T["WriteTool"]["detects file creation via watcher"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "created.txt"), "Write")
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -557,7 +557,7 @@ T["WriteTool"]["detects file modification via watcher"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_pre_tool_use("Edit")
@@ -568,14 +568,14 @@ T["WriteTool"]["detects file modification via watcher"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "existing.txt"), "Edit")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -605,7 +605,7 @@ T["BashTool"]["detects file creation from bash tool"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_pre_tool_use("Bash")
@@ -616,7 +616,7 @@ T["BashTool"]["detects file creation from bash tool"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   -- Bash posts empty file_path
   child.lua([[
@@ -624,7 +624,7 @@ T["BashTool"]["detects file creation from bash tool"] = function()
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -651,7 +651,7 @@ T["BashTool"]["detects file rename (mv) from bash tool"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_pre_tool_use("Bash")
@@ -661,14 +661,14 @@ T["BashTool"]["detects file rename (mv) from bash tool"] = function()
     os.rename(src, dst)
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed("", "Bash")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -702,7 +702,7 @@ T["BashTool"]["detects file deletion from bash tool"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_pre_tool_use("Bash")
@@ -711,14 +711,14 @@ T["BashTool"]["detects file deletion from bash tool"] = function()
     os.remove(path)
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed("", "Bash")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -786,7 +786,7 @@ T["Workflow"]["full multi-tool response cycle"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Response 1: Write a file
   child.lua([[
@@ -796,14 +796,14 @@ T["Workflow"]["full multi-tool response cycle"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "response1.txt"), "Write")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   -- Response 2: Bash mv
   child.lua([[
@@ -814,14 +814,14 @@ T["Workflow"]["full multi-tool response cycle"] = function()
     )
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed("", "Bash")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -842,7 +842,7 @@ T["Workflow"]["Write then Edit on same file"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Write creates the file
   child.lua([[
@@ -853,14 +853,14 @@ T["Workflow"]["Write then Edit on same file"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "evolving.txt"), "Write")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   -- Edit modifies it
   child.lua([[
@@ -871,14 +871,14 @@ T["Workflow"]["Write then Edit on same file"] = function()
     f:close()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "evolving.txt"), "Edit")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -908,7 +908,7 @@ T["Stress"]["rapid sequential writes to different files"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Simulate rapid-fire: PreToolUse -> write 10 files quickly -> PostToolUse for each
   child.lua([[
@@ -922,7 +922,7 @@ T["Stress"]["rapid sequential writes to different files"] = function()
     end
   ]])
 
-  child.wait(1000)
+  child.wait(200)
 
   child.lua([[
     for i = 1, 10 do
@@ -930,13 +930,13 @@ T["Stress"]["rapid sequential writes to different files"] = function()
     end
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_session_end()
   ]])
 
-  child.wait(1000)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -959,7 +959,7 @@ T["Stress"]["rapid overwrites to the same file"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Simulate rapid repeated edits to a single file (like iterative code refinement)
   child.lua([[
@@ -969,14 +969,14 @@ T["Stress"]["rapid overwrites to the same file"] = function()
     f:close()
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Ensure prepopulate picks up the file
   child.lua([[
     claude._on_pre_tool_use("Edit")
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     local path = vim.fs.joinpath(_G.TEST_DIR, "hot_file.txt")
@@ -987,14 +987,14 @@ T["Stress"]["rapid overwrites to the same file"] = function()
     end
   ]])
 
-  child.wait(800)
+  child.wait(390)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "hot_file.txt"), "Edit")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -1015,7 +1015,7 @@ T["Stress"]["multiple tool cycles without session end between them"] = function(
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Claude may fire multiple PreToolUse->PostToolUse cycles in a single response
   child.lua([[
@@ -1026,13 +1026,13 @@ T["Stress"]["multiple tool cycles without session end between them"] = function(
     f1:close()
   ]])
 
-  child.wait(400)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "multi_a.txt"), "Write")
   ]])
 
-  child.wait(200)
+  child.wait(100)
 
   -- Tool 2: Write file B (no session_end between tools)
   child.lua([[
@@ -1042,13 +1042,13 @@ T["Stress"]["multiple tool cycles without session end between them"] = function(
     f2:close()
   ]])
 
-  child.wait(400)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed(vim.fs.joinpath(_G.TEST_DIR, "multi_b.txt"), "Edit")
   ]])
 
-  child.wait(200)
+  child.wait(100)
 
   -- Tool 3: Bash modifies file A
   child.lua([[
@@ -1058,20 +1058,20 @@ T["Stress"]["multiple tool cycles without session end between them"] = function(
     f3:close()
   ]])
 
-  child.wait(400)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed("", "Bash")
   ]])
 
-  child.wait(200)
+  child.wait(100)
 
   -- Now session ends after all three tools
   child.lua([[
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -1099,7 +1099,7 @@ T["Stress"]["burst of 20 files in rapid succession"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_pre_tool_use("Write")
@@ -1112,7 +1112,7 @@ T["Stress"]["burst of 20 files in rapid succession"] = function()
     end
   ]])
 
-  child.wait(1500)
+  child.wait(200)
 
   child.lua([[
     for i = 1, 20 do
@@ -1124,7 +1124,7 @@ T["Stress"]["burst of 20 files in rapid succession"] = function()
     claude._on_session_end()
   ]])
 
-  child.wait(1000)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -1147,7 +1147,7 @@ T["Stress"]["interleaved create-edit-delete cycle"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Create files
   child.lua([[
@@ -1159,7 +1159,7 @@ T["Stress"]["interleaved create-edit-delete cycle"] = function()
     end
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     for i = 1, 5 do
@@ -1168,7 +1168,7 @@ T["Stress"]["interleaved create-edit-delete cycle"] = function()
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   -- Edit some files
   child.lua([[
@@ -1180,7 +1180,7 @@ T["Stress"]["interleaved create-edit-delete cycle"] = function()
     end
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     for i = 1, 3 do
@@ -1189,7 +1189,7 @@ T["Stress"]["interleaved create-edit-delete cycle"] = function()
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   -- Delete some files via bash
   child.lua([[
@@ -1199,14 +1199,14 @@ T["Stress"]["interleaved create-edit-delete cycle"] = function()
     end
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed("", "Bash")
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()
@@ -1237,7 +1237,7 @@ T["Stress"]["watcher toggle rapid cycle"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   -- Rapidly toggle watcher on/off 10 times (simulates many quick tool calls)
   child.lua([[
@@ -1250,7 +1250,7 @@ T["Stress"]["watcher toggle rapid cycle"] = function()
     end
   ]])
 
-  child.wait(800)
+  child.wait(300)
 
   child.lua([[
     for i = 1, 10 do
@@ -1262,13 +1262,13 @@ T["Stress"]["watcher toggle rapid cycle"] = function()
     end
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_session_end()
   ]])
 
-  child.wait(500)
+  child.wait(200)
 
   child.lua([[
     _G.watcher_final = claude._watcher_active
@@ -1286,7 +1286,7 @@ T["Stress"]["many session end calls without changes are safe"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     for _ = 1, 10 do
@@ -1308,13 +1308,13 @@ T["Stress"]["subdirectory file creation via bash"] = function()
     claude.start({ install_hooks = false })
   ]])
 
-  child.wait(300)
+  child.wait(150)
 
   child.lua([[
     claude._on_pre_tool_use("Bash")
   ]])
 
-  child.wait(200)
+  child.wait(100)
 
   child.lua([[
     local subdir = vim.fs.joinpath(_G.TEST_DIR, "src", "components")
@@ -1328,14 +1328,14 @@ T["Stress"]["subdirectory file creation via bash"] = function()
     end
   ]])
 
-  child.wait(1000)
+  child.wait(200)
 
   child.lua([[
     claude._on_file_changed("", "Bash")
     claude._on_session_end()
   ]])
 
-  child.wait(600)
+  child.wait(200)
 
   child.lua([[
     local session_id = claude.get_session_id()

@@ -28,7 +28,7 @@ local T = new_set({
         fs_monitor.clear_all(function()
           _G.cleanup_done = true
         end)
-        vim.wait(2000, function() return _G.cleanup_done end)
+        vim.wait(1400, function() return _G.cleanup_done end)
         pcall(vim.fn.delete, _G.TEST_DIR, "rf")
       ]])
     end,
@@ -59,7 +59,7 @@ T["Worktree"]["rejects non-existent session"] = function()
   ]])
 
   -- Wait for async callback
-  child.wait(1000)
+  child.wait(700)
 
   local result = child.lua_get("_G.result")
   local error_msg = child.lua_get("_G.error_msg")
@@ -90,7 +90,7 @@ T["Worktree"]["rejects session with no changes"] = function()
   ]])
 
   -- Wait for async callback
-  child.wait(1000)
+  child.wait(700)
 
   local result = child.lua_get("_G.result")
   local error_msg = child.lua_get("_G.error_msg")

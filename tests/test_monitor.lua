@@ -145,7 +145,7 @@ T["Monitor"]["detects binary files"] = function()
     end)
   ]])
 
-  child.wait(500, "_G.done == true")
+  child.wait(350, "_G.done == true")
   h.eq("Binary file", child.lua_get("_G.err"))
 end
 

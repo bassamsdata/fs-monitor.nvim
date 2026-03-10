@@ -100,7 +100,7 @@ T["Diff Viewer"]["shows files correctly in viewer"] = function()
     Diff.show(changes, {}, { fs_monitor = mock_fs_monitor })
 
     -- Wait for UI to render
-    vim.wait(100)
+    vim.wait(70)
 
     -- Check that floating windows were created
     _G.floating_wins = 0
@@ -139,7 +139,7 @@ T["Diff Viewer"]["closes on q keymap"] = function()
     }
 
     Diff.show(changes, {}, { fs_monitor = mock_fs_monitor })
-    vim.wait(100)
+    vim.wait(70)
 
     -- Count floating windows before close
     _G.wins_before = 0
@@ -180,7 +180,7 @@ T["Diff Viewer"]["shows correct diff preview for modified file"] = function()
     }
 
     Diff.show(changes, {}, { fs_monitor = mock_fs_monitor })
-    vim.wait(100)
+    vim.wait(70)
 
     -- Find the preview buffer and check its content
     _G.preview_content = nil
@@ -198,6 +198,62 @@ T["Diff Viewer"]["shows correct diff preview for modified file"] = function()
 
   local preview_content = child.lua_get("_G.preview_content")
   h.expect_not_nil(preview_content, "Preview buffer should have diff content")
+end
+
+T["Diff Viewer"]["collapses create rename delete into one transient entry"] = function()
+  child.lua([[
+    local base_time = vim.uv.hrtime()
+    local changes = {
+      {
+        path = "a.txt",
+        kind = "created",
+        new_content = "temp content",
+        timestamp = base_time,
+        tool_name = "workspace",
+        metadata = {},
+      },
+      {
+        path = "b.txt",
+        kind = "renamed",
+        old_content = "temp content",
+        new_content = "temp content",
+        timestamp = base_time + 1000,
+        tool_name = "workspace",
+        metadata = { old_path = "a.txt", new_path = "b.txt" },
+      },
+      {
+        path = "b.txt",
+        kind = "deleted",
+        old_content = "temp content",
+        timestamp = base_time + 2000,
+        tool_name = "workspace",
+        metadata = {},
+      },
+    }
+
+    local mock_fs_monitor = {
+      revert_to_checkpoint = function() end,
+      revert_to_original = function() end,
+    }
+
+    local viewer = Diff.show(changes, {}, { fs_monitor = mock_fs_monitor })
+    vim.wait(70)
+
+    _G.summary_files = viewer and viewer.summary and viewer.summary.files or {}
+    _G.net_operation = viewer and viewer.summary and viewer.summary.by_file["b.txt"]
+      and viewer.summary.by_file["b.txt"].net_operation or nil
+    _G.has_old_path_entry = viewer and viewer.summary and viewer.summary.by_file["a.txt"] ~= nil or false
+    _G.preview_content = viewer and viewer.right_buf and vim.api.nvim_buf_get_lines(viewer.right_buf, 0, -1, false) or {}
+  ]])
+
+  local summary_files = child.lua_get("_G.summary_files")
+  h.eq({ "b.txt" }, summary_files)
+  h.eq("transient", child.lua_get("_G.net_operation"))
+  h.eq(false, child.lua_get("_G.has_old_path_entry"))
+
+  local preview_content = child.lua_get("_G.preview_content")
+  h.expect_true(#preview_content > 0, "Transient lifecycle should still render a preview")
+  h.expect_contains("temp content", table.concat(preview_content, "\n"))
 end
 
 T["Diff Viewer"]["handles checkpoints in viewer"] = function()
@@ -235,7 +291,7 @@ T["Diff Viewer"]["handles checkpoints in viewer"] = function()
     }
 
     Diff.show(changes, checkpoints, { fs_monitor = mock_fs_monitor })
-    vim.wait(100)
+    vim.wait(70)
 
     -- Find the checkpoints buffer
     _G.checkpoint_content = nil
@@ -270,7 +326,7 @@ T["Diff Viewer"]["shows summary stats"] = function()
     }
 
     Diff.show(changes, {}, { fs_monitor = mock_fs_monitor })
-    vim.wait(100)
+    vim.wait(70)
 
     _G.viewer_shown = true
     _G.num_bufs = #vim.api.nvim_list_bufs()
