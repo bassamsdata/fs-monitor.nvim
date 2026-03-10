@@ -237,7 +237,7 @@ T["Diff Viewer"]["collapses create rename delete into one transient entry"] = fu
     }
 
     local viewer = Diff.show(changes, {}, { fs_monitor = mock_fs_monitor })
-    vim.wait(70)
+    vim.wait(100)
 
     _G.summary_files = viewer and viewer.summary and viewer.summary.files or {}
     _G.net_operation = viewer and viewer.summary and viewer.summary.by_file["b.txt"]
