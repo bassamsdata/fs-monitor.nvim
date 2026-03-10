@@ -6,10 +6,19 @@ local M = {}
 ---@param pattern string Event pattern name
 ---@param data table Event data
 local function fire_event(pattern, data)
-  vim.api.nvim_exec_autocmds("User", {
-    pattern = pattern,
-    data = data,
-  })
+  local function emit()
+    vim.api.nvim_exec_autocmds("User", {
+      pattern = pattern,
+      data = data,
+    })
+  end
+
+  if vim.in_fast_event() then
+    vim.schedule(emit)
+    return
+  end
+
+  emit()
 end
 
 ---@type table<string, FSMonitor.Session>
@@ -166,6 +175,26 @@ function M.activate_watcher(session_id)
   return ok
 end
 
+---Deactivate the FS watcher without destroying the watch
+---Stops the FS event handle but preserves the watch structure, cache, and active_watcher_id.
+---Can be re-activated later via activate_watcher().
+---@param session_id string
+---@return boolean success
+function M.deactivate_watcher(session_id)
+  local session = M._sessions[session_id]
+  if not session or not session.active_watcher_id then return false end
+
+  local ok = session.monitor:deactivate_watcher(session.active_watcher_id)
+  if ok then
+    fire_event("FSMonitorPaused", {
+      session_id = session_id,
+      watch_id = session.active_watcher_id,
+    })
+  end
+
+  return ok
+end
+
 ---Pause monitoring for a session
 ---@param session_id string
 ---@param callback? fun(changes: FSMonitor.Change[])
@@ -224,29 +253,52 @@ function M.resume(session_id, target_path, opts)
   return M.start(session_id, target_path, opts)
 end
 
----Refresh cache with current file state and discard tracked changes
+---Refresh cache baseline from current file metadata without rebuilding the whole cache
 ---@param session_id string
----@param callback? fun(stats: { refreshed: number, deleted: number, errors: number })
+---@param callback? fun(stats: { refreshed: number, deleted: number, errors: number, files_scanned: number, elapsed_ms: number })
 function M.refresh_baseline(session_id, callback)
   local session = M._sessions[session_id]
   if not session then
-    if callback then callback({ refreshed = 0, deleted = 0, errors = 0 }) end
+    if callback then callback({ refreshed = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 }) end
     return
   end
 
   if not session.active_watcher_id then
-    if callback then callback({ refreshed = 0, deleted = 0, errors = 0 }) end
+    if callback then callback({ refreshed = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 }) end
     return
   end
 
-  session.monitor:refresh_changed_files(session.active_watcher_id, function(stats)
+  session.monitor:refresh_baseline_from_metadata(session.active_watcher_id, function(stats)
     fire_event("FSMonitorBaselineRefreshed", {
       session_id = session_id,
       refreshed = stats.refreshed,
       deleted = stats.deleted,
       errors = stats.errors,
+      files_scanned = stats.files_scanned,
+      elapsed_ms = stats.elapsed_ms,
     })
 
+    if callback then callback(stats) end
+  end)
+end
+
+---Reconcile a session against the current filesystem and register missed changes.
+---@param session_id string
+---@param opts? { tool_name?: string, source?: string }
+---@param callback? fun(stats: FSMonitor.ReconcileStats)
+function M.reconcile(session_id, opts, callback)
+  local session = M._sessions[session_id]
+  if not session then
+    if callback then callback({ created = 0, modified = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 }) end
+    return
+  end
+
+  if not session.active_watcher_id then
+    if callback then callback({ created = 0, modified = 0, deleted = 0, errors = 0, files_scanned = 0, elapsed_ms = 0 }) end
+    return
+  end
+
+  session.monitor:reconcile_with_metadata(session.active_watcher_id, opts, function(stats)
     if callback then callback(stats) end
   end)
 end

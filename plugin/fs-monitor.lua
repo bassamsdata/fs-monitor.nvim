@@ -12,7 +12,19 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
   local util = require("fs-monitor.utils.util")
 
   if subcmd == "start" then
-    local session_id = args[2]
+    local target = args[2]
+
+    -- Adapter dispatch: start claude | start opencode [port]
+    if target == "claude" then
+      require("fs-monitor.providers.claude").start()
+      return
+    elseif target == "opencode" then
+      require("fs-monitor.providers.opencode").start()
+      return
+    end
+
+    -- Default: start a plain session
+    local session_id = target
     local session = fs_monitor.create_session({ id = session_id })
     fs_monitor.start(session.id, vim.fn.getcwd(), {
       on_ready = function(stats)
@@ -60,7 +72,18 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
       end
     end
   elseif subcmd == "stop" then
-    local session_id = args[2]
+    local target = args[2]
+
+    -- Adapter dispatch: stop claude | stop opencode
+    if target == "claude" then
+      require("fs-monitor.providers.claude").stop()
+      return
+    elseif target == "opencode" then
+      require("fs-monitor.providers.opencode").stop()
+      return
+    end
+
+    local session_id = target
     if not session_id or session_id == "" then
       util.notify("Session ID required for stop", vim.log.levels.WARN)
     else
@@ -194,15 +217,19 @@ vim.api.nvim_create_user_command("FSMonitor", function(opts)
       "Usage: :FSMonitor <subcommand> [args]",
       "",
       "Subcommands:",
-      "  start [session_id]   - Start a new monitoring session",
-      "  pause <session_id>   - Pause monitoring (keeps session alive)",
-      "  resume <session_id>  - Resume monitoring existing session",
-      "  stop <session_id>    - Stop and destroy session (with confirmation)",
-      "  destroy [session_id] - Destroy session (or all if no ID, no confirmation)",
-      "  show [session_id]    - Show diff viewer for a session",
-      "  stats [session_id]   - Show session statistics",
-      "  worktree [session_id] - Create a worktree from session changes",
-      "  help                 - Show this help message",
+      "  start [session_id]     - Start a new monitoring session",
+      "  start claude           - Start Claude Code monitoring (installs hooks)",
+      "  start opencode          - Start OpenCode monitoring (installs JS plugin)",
+      "  pause <session_id>     - Pause monitoring (keeps session alive)",
+      "  resume <session_id>    - Resume monitoring existing session",
+      "  stop <session_id>      - Stop and destroy session (with confirmation)",
+      "  stop claude            - Stop Claude Code monitoring",
+      "  stop opencode          - Stop OpenCode monitoring",
+      "  destroy [session_id]   - Destroy session (or all if no ID, no confirmation)",
+      "  show [session_id]      - Show diff viewer for a session",
+      "  stats [session_id]     - Show session statistics",
+      "  worktree [session_id]  - Create a worktree from session changes",
+      "  help                   - Show this help message",
     }
     util.notify(table.concat(help, "\n"))
   else
@@ -221,6 +248,25 @@ end, {
       return vim.tbl_filter(function(s)
         return s:find(arg_lead, 1, true) == 1
       end, subcommands)
+    end
+
+    -- Complete 'start' and 'stop' with adapter names
+    if num_args >= 2 then
+      local subcmd_arg = args[2]
+      if subcmd_arg == "start" or subcmd_arg == "stop" then
+        local targets = { "claude", "opencode" }
+        -- Also include session IDs
+        local ok_fs, fs_mod = pcall(require, "fs-monitor")
+        if ok_fs then
+          local sessions = fs_mod.get_all_sessions()
+          for sid, _ in pairs(sessions) do
+            table.insert(targets, sid)
+          end
+        end
+        return vim.tbl_filter(function(s)
+          return s:find(arg_lead, 1, true) == 1
+        end, targets)
+      end
     end
 
     -- Complete session IDs for commands that need them

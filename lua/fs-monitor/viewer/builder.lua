@@ -85,11 +85,12 @@ function M.create_windows(viewer, geom, cfg)
   vim.b[viewer.right_buf].miniindentscope_disable = true
 
   ui_utils.set_winbar(viewer.files_win, {
-    { keys = km.cycle_focus.key, desc = "Tab" },
+    { keys = km.cycle_focus.key, desc = "Win Nav" },
     { keys = km.goto_file.key, desc = "File" },
     { keys = km.toggle_help.key, desc = "Help" },
   })
 
+  -- TODO: add reset view filter mention here
   ui_utils.set_winbar(viewer.checkpoints_win, {
     { keys = km.view_checkpoint.key, desc = "View" },
     { keys = km.view_cumulative.key, desc = "Accum" },
@@ -102,7 +103,7 @@ function M.create_windows(viewer, geom, cfg)
     { keys = km.toggle_word_diff.key, desc = "Diff-Word" },
     { keys = km.revert_hunk.key, desc = "Revert" },
     { keys = km.next_hunk.key .. "/" .. km.prev_hunk.key, desc = "Hunk" },
-    { keys = km.next_file.key .. "/" .. km.prev_file.key, desc = "Nav" },
+    { keys = km.next_file.key .. "/" .. km.prev_file.key, desc = "File Nav" },
     { keys = km.toggle_help.key, desc = "Help" },
   })
 end
